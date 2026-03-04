@@ -10,7 +10,7 @@
 #include "PluginEditor.h"
 
 //==============================================================================
-ChordVisualizer_synthAudioProcessor::ChordVisualizer_synthAudioProcessor()
+HarmonyVisualizerAudioProcessor::HarmonyVisualizerAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
@@ -24,17 +24,17 @@ ChordVisualizer_synthAudioProcessor::ChordVisualizer_synthAudioProcessor()
 {
 }
 
-ChordVisualizer_synthAudioProcessor::~ChordVisualizer_synthAudioProcessor()
+HarmonyVisualizerAudioProcessor::~HarmonyVisualizerAudioProcessor()
 {
 }
 
 //==============================================================================
-const juce::String ChordVisualizer_synthAudioProcessor::getName() const
+const juce::String HarmonyVisualizerAudioProcessor::getName() const
 {
     return JucePlugin_Name;
 }
 
-bool ChordVisualizer_synthAudioProcessor::acceptsMidi() const
+bool HarmonyVisualizerAudioProcessor::acceptsMidi() const
 {
    #if JucePlugin_WantsMidiInput
     return true;
@@ -43,7 +43,7 @@ bool ChordVisualizer_synthAudioProcessor::acceptsMidi() const
    #endif
 }
 
-bool ChordVisualizer_synthAudioProcessor::producesMidi() const
+bool HarmonyVisualizerAudioProcessor::producesMidi() const
 {
    #if JucePlugin_ProducesMidiOutput
     return true;
@@ -52,7 +52,7 @@ bool ChordVisualizer_synthAudioProcessor::producesMidi() const
    #endif
 }
 
-bool ChordVisualizer_synthAudioProcessor::isMidiEffect() const
+bool HarmonyVisualizerAudioProcessor::isMidiEffect() const
 {
    #if JucePlugin_IsMidiEffect
     return true;
@@ -61,51 +61,51 @@ bool ChordVisualizer_synthAudioProcessor::isMidiEffect() const
    #endif
 }
 
-double ChordVisualizer_synthAudioProcessor::getTailLengthSeconds() const
+double HarmonyVisualizerAudioProcessor::getTailLengthSeconds() const
 {
     return 0.0;
 }
 
-int ChordVisualizer_synthAudioProcessor::getNumPrograms()
+int HarmonyVisualizerAudioProcessor::getNumPrograms()
 {
     return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
                 // so this should be at least 1, even if you're not really implementing programs.
 }
 
-int ChordVisualizer_synthAudioProcessor::getCurrentProgram()
+int HarmonyVisualizerAudioProcessor::getCurrentProgram()
 {
     return 0;
 }
 
-void ChordVisualizer_synthAudioProcessor::setCurrentProgram (int index)
+void HarmonyVisualizerAudioProcessor::setCurrentProgram (int index)
 {
 }
 
-const juce::String ChordVisualizer_synthAudioProcessor::getProgramName (int index)
+const juce::String HarmonyVisualizerAudioProcessor::getProgramName (int index)
 {
     return {};
 }
 
-void ChordVisualizer_synthAudioProcessor::changeProgramName (int index, const juce::String& newName)
+void HarmonyVisualizerAudioProcessor::changeProgramName (int index, const juce::String& newName)
 {
 }
 
 //==============================================================================
-void ChordVisualizer_synthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void HarmonyVisualizerAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
     reset();
 }
 
-void ChordVisualizer_synthAudioProcessor::releaseResources()
+void HarmonyVisualizerAudioProcessor::releaseResources()
 {
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
-bool ChordVisualizer_synthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool HarmonyVisualizerAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
   #if JucePlugin_IsMidiEffect
     juce::ignoreUnused (layouts);
@@ -130,7 +130,7 @@ bool ChordVisualizer_synthAudioProcessor::isBusesLayoutSupported (const BusesLay
 }
 #endif
 
-void ChordVisualizer_synthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void HarmonyVisualizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     // これが呼ばれること自体がオーディオエンジン起動の証明
     /*
@@ -169,25 +169,25 @@ void ChordVisualizer_synthAudioProcessor::processBlock (juce::AudioBuffer<float>
 }
 
 //==============================================================================
-bool ChordVisualizer_synthAudioProcessor::hasEditor() const
+bool HarmonyVisualizerAudioProcessor::hasEditor() const
 {
     return true; // (change this to false if you choose to not supply an editor)
 }
 
-juce::AudioProcessorEditor* ChordVisualizer_synthAudioProcessor::createEditor()
+juce::AudioProcessorEditor* HarmonyVisualizerAudioProcessor::createEditor()
 {
-    return new ChordVisualizer_synthAudioProcessorEditor (*this);
+    return new HarmonyVisualizerAudioProcessorEditor (*this);
 }
 
 //==============================================================================
-void ChordVisualizer_synthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void HarmonyVisualizerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // You should use this method to store your parameters in the memory block.
     // You could do that either as raw data, or use the XML or ValueTree classes
     // as intermediaries to make it easy to save and load complex data.
 }
 
-void ChordVisualizer_synthAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void HarmonyVisualizerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     // You should use this method to restore your parameters from this memory block,
     // whose contents will have been created by the getStateInformation() call.
@@ -197,5 +197,5 @@ void ChordVisualizer_synthAudioProcessor::setStateInformation (const void* data,
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new ChordVisualizer_synthAudioProcessor();
+    return new HarmonyVisualizerAudioProcessor();
 }

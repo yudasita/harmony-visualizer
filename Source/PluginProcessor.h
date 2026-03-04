@@ -13,12 +13,12 @@
 //==============================================================================
 /**
 */
-class ChordVisualizer_synthAudioProcessor  : public juce::AudioProcessor
+class HarmonyVisualizerAudioProcessor  : public juce::AudioProcessor
 {
 public:
     //==============================================================================
-    ChordVisualizer_synthAudioProcessor();
-    ~ChordVisualizer_synthAudioProcessor() override;
+    HarmonyVisualizerAudioProcessor();
+    ~HarmonyVisualizerAudioProcessor() override;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -58,7 +58,7 @@ public:
 
 private:
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordVisualizer_synthAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HarmonyVisualizerAudioProcessor)
     
     std::vector<int> activeNotes; // 現在押されているノート番号
     juce::CriticalSection noteLock; // スレッド安全のためのロック

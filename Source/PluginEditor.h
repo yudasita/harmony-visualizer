@@ -14,11 +14,11 @@
 //==============================================================================
 /**
 */
-class ChordVisualizer_synthAudioProcessorEditor  : public juce::AudioProcessorEditor, public juce::Timer
+class HarmonyVisualizerAudioProcessorEditor  : public juce::AudioProcessorEditor, public juce::Timer
 {
 public:
-    ChordVisualizer_synthAudioProcessorEditor (ChordVisualizer_synthAudioProcessor&);
-    ~ChordVisualizer_synthAudioProcessorEditor() override;
+    HarmonyVisualizerAudioProcessorEditor (HarmonyVisualizerAudioProcessor&);
+    ~HarmonyVisualizerAudioProcessorEditor() override;
 
     //==============================================================================
     void paint (juce::Graphics&) override;
@@ -29,7 +29,7 @@ public:
 private:
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
-    ChordVisualizer_synthAudioProcessor& audioProcessor;
+    HarmonyVisualizerAudioProcessor& audioProcessor;
     
     struct LineParam {
         juce::Colour colour;
@@ -67,5 +67,5 @@ private:
         return juce::MathConstants<float>::twoPi * circleIdx / 12.0f;;
     }
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordVisualizer_synthAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HarmonyVisualizerAudioProcessorEditor)
 };

@@ -10,7 +10,7 @@
 #include "PluginEditor.h"
 
 //==============================================================================
-ChordVisualizer_synthAudioProcessorEditor::ChordVisualizer_synthAudioProcessorEditor (ChordVisualizer_synthAudioProcessor& p)
+HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (HarmonyVisualizerAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
     // Make sure that before the constructor has finished, you've set the
@@ -20,20 +20,20 @@ ChordVisualizer_synthAudioProcessorEditor::ChordVisualizer_synthAudioProcessorEd
     startTimerHz(60);
 }
 
-ChordVisualizer_synthAudioProcessorEditor::~ChordVisualizer_synthAudioProcessorEditor()
+HarmonyVisualizerAudioProcessorEditor::~HarmonyVisualizerAudioProcessorEditor()
 {
     stopTimer();
 }
 
 //==============================================================================
 
-void ChordVisualizer_synthAudioProcessorEditor::timerCallback()
+void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 {
     // 画面を再描画（paint関数を呼び出す）
     repaint();
 }
 
-void ChordVisualizer_synthAudioProcessorEditor::paint (juce::Graphics& g)
+void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (backgroundColour); // 背景
 
@@ -47,8 +47,8 @@ void ChordVisualizer_synthAudioProcessorEditor::paint (juce::Graphics& g)
     // Processorから音を取得
     std::vector<int> notes;
     {
-        juce::ScopedLock sl (dynamic_cast<ChordVisualizer_synthAudioProcessor&>(processor).getNoteLock());
-        notes = dynamic_cast<ChordVisualizer_synthAudioProcessor&>(processor).getActiveNotes();
+        juce::ScopedLock sl (dynamic_cast<HarmonyVisualizerAudioProcessor&>(processor).getNoteLock());
+        notes = dynamic_cast<HarmonyVisualizerAudioProcessor&>(processor).getActiveNotes();
     }
 
     // 座標を計算してプロット
@@ -132,7 +132,7 @@ void ChordVisualizer_synthAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText (pitches.trim(), centerArea, juce::Justification::centred);
 }
 
-void ChordVisualizer_synthAudioProcessorEditor::resized()
+void HarmonyVisualizerAudioProcessorEditor::resized()
 {
     // This is generally where you'll want to lay out the positions of any
     // subcomponents in your editor..
