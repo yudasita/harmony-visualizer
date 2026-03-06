@@ -40,8 +40,8 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (backgroundColour); // 背景
     
-    g.setColour(juce::Colours::darkgrey);
-    g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleRadius * 2.0f, circleRadius * 2.0f, 1.0f);
+    g.setColour(circleColour);
+    g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleDiameter, circleDiameter, circleThickness);
 
     // Processorから音を取得
     std::vector<int> notes;
@@ -59,6 +59,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     {
         int pc = note % 12; // オクターブを消す
         int circleIdx = (pc * 7) % 12; // 五度圏変換
+        //int circleIdx = pc;
         
         // まだ activeIdx に入っていない場合だけ追加
         if (!activeIdx.contains(circleIdx)) {
@@ -83,17 +84,17 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
                 
                 juce::Point<float> endPoint = circleCenter.getPointOnCircumference(circleRadius, getAngle(activeIdx[j]));
                 
-                g.setColour(lineColours.find(dist)->second);
+                g.setColour(pitchLine_colours.find(dist)->second);
                 
                 juce::Path p;
                 p.startNewSubPath(startPoint);
                 p.lineTo(endPoint);
                 
-                g.strokePath(p, juce::PathStrokeType(lineThickness));
+                g.strokePath(p, juce::PathStrokeType(pitchLine_thickness));
             }
             
             g.setColour(activeIdx[i] == rootIdx ? pointColour_root : pointColour);
-            g.fillEllipse(startPoint.x - 3, startPoint.y - 3, 6, 6);
+            g.fillEllipse(startPoint.x - pitchPoint_radius, startPoint.y - pitchPoint_radius, pitchPoint_diameter, pitchPoint_diameter);
         }
     }
     
@@ -103,14 +104,13 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     for (int i = 0; i < 12; ++i)
     {
         float angle = getAngle(i);
-        auto p = circleCenter.getPointOnCircumference (labelcircleRadius, angle);
+        auto p = circleCenter.getPointOnCircumference (labelCircle_radius, angle);
         
         bool isActive = activeIdx.contains(i);
         g.setColour (isActive ? pointColour : juce::Colours::darkgrey);
 
-        juce::Rectangle<float> textRect (40.0f, 20.0f);
-        textRect.setCentre (p);
-        g.drawText (circleNoteNames[i], textRect, juce::Justification::centred);
+        labelCircle_rect.setCentre (p);
+        g.drawText (circleNoteNames[i], labelCircle_rect, juce::Justification::centred);
     }
     
     // 構成音
@@ -122,23 +122,29 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white);
     g.setFont (labelCircle_fontsize);
     
-    auto circleCenterArea = juce::Rectangle<float> (circleRadius * 0.6f, circleRadius * 0.6f);
-    circleCenterArea.setCentre (circleCenter);
+    labelCentre_rect.setCentre (circleCenter);
     
-    g.drawText (pitches.trim(), circleCenterArea, juce::Justification::centred);
+    g.drawText (pitches.trim(), labelCentre_rect, juce::Justification::centred);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::resized()
 {
-    // 画面全体から余白を引いた領域を定義
     drawingArea = getLocalBounds().toFloat().reduced(0.0f);
     
-    // 中心と半径を計算して保存
     circleCenter = drawingArea.getCentre();
     circleRadius = juce::jmin(drawingArea.getWidth(), drawingArea.getHeight()) * 0.4f;
+    circleDiameter = 2 * circleRadius;
+    circleThickness = 0.02f / 3 * circleRadius;
     
+    labelCircle_rect = {0.15f * circleRadius, 0.15f * circleRadius};
     labelCircle_fontsize = 0.1f * circleRadius;
-    labelcircleRadius = 1.1f * circleRadius;
+    labelCircle_radius = 1.1f * circleRadius;
     
-    lineThickness = 0.01f * circleRadius;
+    pitchLine_thickness = 0.01f * circleRadius;
+    
+    pitchPoint_radius = 0.02f * circleRadius;
+    pitchPoint_diameter = 2 * pitchPoint_radius;
+    
+    labelCentre_fontsize = 0.1f * circleRadius;
+    labelCentre_rect = {circleDiameter, 0.6f * circleRadius};
 }

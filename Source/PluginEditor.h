@@ -33,13 +33,22 @@ private:
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;
     float circleRadius;
+    float circleDiameter;
+    float circleThickness;
+    juce::Rectangle<float> labelCircle_rect;
     float labelCircle_fontsize;
-    float labelcircleRadius;
-    float lineThickness;
+    float labelCircle_radius;
+    float pitchLine_thickness;
+    float pitchPoint_radius;
+    float pitchPoint_diameter;
+    
+    juce::Rectangle<float> labelCentre_rect;
+    float labelCentre_fontsize;
     
     // 五度圏順（Cから時計回り）の音名
     const juce::StringArray circleNoteNames
         { "C", "G", "D", "A", "E", "B", "Gb", "Db", "Ab", "Eb", "Bb", "F" };
+        //{ "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
     
     const std::unordered_map<juce::String, juce::Array<int>> triad = {
         { "major", {0, 1, 4} },
@@ -49,13 +58,14 @@ private:
     };
     
     const juce::Colour backgroundColour = juce::Colours::black;
+    const juce::Colour circleColour = juce::Colours::darkgrey;
     const juce::Colour pointColour_root = juce::Colours::orangered;
     const juce::Colour pointColour = juce::Colours::white;
     
     const float lineS = 0.5f;
     const float lineV = 1.0f;
     const float lineA = 1.0f;
-    const std::unordered_map<int, juce::Colour> lineColours = {
+    const std::unordered_map<int, juce::Colour> pitchLine_colours = {
         { 1, juce::Colour::fromHSV (0.67f, lineS, lineV, lineA) },
         { 2, juce::Colour::fromHSV (0.07f, lineS, lineV, lineA) },
         { 3, juce::Colour::fromHSV (0.33f, lineS, lineV, lineA) },
