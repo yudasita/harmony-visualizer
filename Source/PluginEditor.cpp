@@ -18,6 +18,9 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
     setSize (400, 400);
         
     startTimerHz(60);
+    
+    setResizable (true, true);
+    setResizeLimits (300, 300, 1000, 1000);
 }
 
 HarmonyVisualizerAudioProcessorEditor::~HarmonyVisualizerAudioProcessorEditor()
@@ -36,13 +39,9 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (backgroundColour); // 背景
-
-    auto area = getLocalBounds().toFloat().reduced(0.0f);
-    auto center = area.getCentre();
-    auto radius = juce::jmin(area.getWidth(), area.getHeight()) * 0.4f;
     
     g.setColour(juce::Colours::darkgrey);
-    g.drawEllipse (center.x - radius, center.y - radius, radius * 2.0f, radius * 2.0f, 1.0f);
+    g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleRadius * 2.0f, circleRadius * 2.0f, 1.0f);
 
     // Processorから音を取得
     std::vector<int> notes;
@@ -76,23 +75,21 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     if (activeIdx.size() > 0)
     {
         for (int i = 0; i < activeIdx.size(); ++i) {
-            juce::Point<float> startPoint = center.getPointOnCircumference(radius, getAngle(activeIdx[i]));
+            juce::Point<float> startPoint = circleCenter.getPointOnCircumference(circleRadius, getAngle(activeIdx[i]));
             
             for (int j = i+1; j < activeIdx.size(); ++j) {
                 int dist = std::abs(activeIdx[i] - activeIdx[j]);
                 if (dist > 6) dist = 12 - dist;
                 
-                juce::Point<float> endPoint = center.getPointOnCircumference(radius, getAngle(activeIdx[j]));
+                juce::Point<float> endPoint = circleCenter.getPointOnCircumference(circleRadius, getAngle(activeIdx[j]));
                 
-                auto lp = lineParams.find(dist)->second;
-                
-                g.setColour(lp.colour);
+                g.setColour(lineColours.find(dist)->second);
                 
                 juce::Path p;
                 p.startNewSubPath(startPoint);
                 p.lineTo(endPoint);
                 
-                g.strokePath(p, juce::PathStrokeType(lp.thickness));
+                g.strokePath(p, juce::PathStrokeType(lineThickness));
             }
             
             g.setColour(activeIdx[i] == rootIdx ? pointColour_root : pointColour);
@@ -101,13 +98,12 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     }
     
     // 五度圏の音名
-    g.setFont (15.0f); // 文字の大きさ
+    g.setFont (labelCircle_fontsize); // 文字の大きさ
 
     for (int i = 0; i < 12; ++i)
     {
-        float labelRadius = radius + 18.0f;
         float angle = getAngle(i);
-        auto p = center.getPointOnCircumference (labelRadius, angle);
+        auto p = circleCenter.getPointOnCircumference (labelcircleRadius, angle);
         
         bool isActive = activeIdx.contains(i);
         g.setColour (isActive ? pointColour : juce::Colours::darkgrey);
@@ -124,16 +120,25 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     }
     
     g.setColour (juce::Colours::white);
-    g.setFont (15.0f);
+    g.setFont (labelCircle_fontsize);
     
-    auto centerArea = juce::Rectangle<float> (radius * 0.6f, radius * 0.6f);
-    centerArea.setCentre (center);
+    auto circleCenterArea = juce::Rectangle<float> (circleRadius * 0.6f, circleRadius * 0.6f);
+    circleCenterArea.setCentre (circleCenter);
     
-    g.drawText (pitches.trim(), centerArea, juce::Justification::centred);
+    g.drawText (pitches.trim(), circleCenterArea, juce::Justification::centred);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::resized()
 {
-    // This is generally where you'll want to lay out the positions of any
-    // subcomponents in your editor..
+    // 画面全体から余白を引いた領域を定義
+    drawingArea = getLocalBounds().toFloat().reduced(0.0f);
+    
+    // 中心と半径を計算して保存
+    circleCenter = drawingArea.getCentre();
+    circleRadius = juce::jmin(drawingArea.getWidth(), drawingArea.getHeight()) * 0.4f;
+    
+    labelCircle_fontsize = 0.1f * circleRadius;
+    labelcircleRadius = 1.1f * circleRadius;
+    
+    lineThickness = 0.01f * circleRadius;
 }

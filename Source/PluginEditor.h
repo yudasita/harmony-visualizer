@@ -10,7 +10,6 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-
 //==============================================================================
 /**
 */
@@ -31,10 +30,12 @@ private:
     // access the processor object that created it.
     HarmonyVisualizerAudioProcessor& audioProcessor;
     
-    struct LineParam {
-        juce::Colour colour;
-        float thickness;
-    };
+    juce::Rectangle<float> drawingArea;
+    juce::Point<float> circleCenter;
+    float circleRadius;
+    float labelCircle_fontsize;
+    float labelcircleRadius;
+    float lineThickness;
     
     // 五度圏順（Cから時計回り）の音名
     const juce::StringArray circleNoteNames
@@ -54,13 +55,13 @@ private:
     const float lineS = 0.5f;
     const float lineV = 1.0f;
     const float lineA = 1.0f;
-    const std::unordered_map<int, LineParam> lineParams = {
-        { 1, {juce::Colour::fromHSV (0.67f, lineS, lineV, lineA), 1.5f} },
-        { 2, {juce::Colour::fromHSV (0.07f, lineS, lineV, lineA), 1.5f} },
-        { 3, {juce::Colour::fromHSV (0.33f, lineS, lineV, lineA), 1.5f} },
-        { 4, {juce::Colour::fromHSV (0.22f, lineS, lineV, lineA), 1.5f} },
-        { 5, {juce::Colour::fromHSV (0.07f, lineS, lineV, lineA), 1.5f} },
-        { 6, {juce::Colour::fromHSV (0.0f, lineS, lineV, lineA), 1.5f} },
+    const std::unordered_map<int, juce::Colour> lineColours = {
+        { 1, juce::Colour::fromHSV (0.67f, lineS, lineV, lineA) },
+        { 2, juce::Colour::fromHSV (0.07f, lineS, lineV, lineA) },
+        { 3, juce::Colour::fromHSV (0.33f, lineS, lineV, lineA) },
+        { 4, juce::Colour::fromHSV (0.22f, lineS, lineV, lineA) },
+        { 5, juce::Colour::fromHSV (0.07f, lineS, lineV, lineA) },
+        { 6, juce::Colour::fromHSV (0.0f, lineS, lineV, lineA) },
     };
     
     float getAngle(int circleIdx){
