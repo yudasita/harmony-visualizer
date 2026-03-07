@@ -85,12 +85,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
                 juce::Point<float> endPoint = circleCenter.getPointOnCircumference(circleRadius, getAngle(activeIdx[j]));
                 
                 g.setColour(pitchLine_colours.find(dist)->second);
-                
-                juce::Path p;
-                p.startNewSubPath(startPoint);
-                p.lineTo(endPoint);
-                
-                g.strokePath(p, juce::PathStrokeType(pitchLine_thickness));
+                g.drawLine(juce::Line<float>(startPoint, endPoint), pitchLine_thickness);
             }
             
             g.setColour(activeIdx[i] == rootIdx ? pointColour_root : pointColour);
