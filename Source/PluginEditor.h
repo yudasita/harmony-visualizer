@@ -10,6 +10,7 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "ChordBoundaryDetector.h"
 #include <unordered_map>
 #include <vector>
 
@@ -28,12 +29,14 @@ public:
     
     void timerCallback() override;
 
+    ChordBoundaryDetector& getChordDetector() noexcept { return chordDetector; }
+
 private:
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
     HarmonyVisualizerAudioProcessor& audioProcessor;
     
-    std::vector<int> currentActiveNotes;
+    ChordBoundaryDetector chordDetector;
 
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;

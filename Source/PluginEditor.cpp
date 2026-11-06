@@ -28,34 +28,15 @@ HarmonyVisualizerAudioProcessorEditor::~HarmonyVisualizerAudioProcessorEditor()
 //==============================================================================
 void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 {
-    // ロックフリーFIFOから未読イベントを取り出して現在の発音ノートを更新
-    audioProcessor.popMidiEvents ([this] (const QueuedMidiEvent& event)
-    {
-        const int noteNumber = static_cast<int> (event.noteOrController);
+    const double currentTimeMs = juce::Time::getMillisecondCounterHiRes();
 
-        if (event.type == QueuedMidiEvent::Type::noteOn)
-        {
-            if (event.value > 0)
-            {
-                if (std::find (currentActiveNotes.begin(), currentActiveNotes.end(), noteNumber) == currentActiveNotes.end())
-                    currentActiveNotes.push_back (noteNumber);
-            }
-            else
-            {
-                currentActiveNotes.erase (std::remove (currentActiveNotes.begin(), currentActiveNotes.end(), noteNumber),
-                                          currentActiveNotes.end());
-            }
-        }
-        else if (event.type == QueuedMidiEvent::Type::noteOff)
-        {
-            currentActiveNotes.erase (std::remove (currentActiveNotes.begin(), currentActiveNotes.end(), noteNumber),
-                                      currentActiveNotes.end());
-        }
-        else if (event.type == QueuedMidiEvent::Type::allNotesOff)
-        {
-            currentActiveNotes.clear();
-        }
+    // ロックフリーFIFOから未読イベントを取り出してコード境界判定エンジンへ渡す
+    audioProcessor.popMidiEvents ([this, currentTimeMs] (const QueuedMidiEvent& event)
+    {
+        chordDetector.processMidiEvent (event, currentTimeMs);
     });
+
+    chordDetector.update (currentTimeMs);
 
     repaint();
 }
@@ -67,8 +48,10 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (circleColour);
     g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleDiameter, circleDiameter, circleThickness);
 
-    // UIスレッド内のアクティブノートを使用（排他ロック不要）
-    const std::vector<int> notes = currentActiveNotes;
+    // コード境界判定エンジンから確定状態を取得
+    const auto& chordState = chordDetector.getCurrentChordState();
+    const std::vector<int>& notes = chordState.notes;
+    const float alphaMultiplier = chordState.isDimmed ? 0.35f : 1.0f;
 
     // 座標を計算してプロット
     juce::Array<int> activeIdx;
@@ -109,15 +92,14 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
                 juce::Point<float> endPoint = circleCenter.getPointOnCircumference (circleRadius, getAngle (activeIdx[j]));
                 
                 auto it = pitchLine_colours.find (dist);
-                if (it != pitchLine_colours.end())
-                    g.setColour (it->second);
-                else
-                    g.setColour (juce::Colours::white);
+                juce::Colour lineColour = (it != pitchLine_colours.end() ? it->second : juce::Colours::white);
+                g.setColour (lineColour.withMultipliedAlpha (alphaMultiplier));
 
                 g.drawLine (juce::Line<float> (startPoint, endPoint), pitchLine_thickness);
             }
             
-            g.setColour (activeIdx[i] == rootIdx ? pointColour_root : pointColour);
+            juce::Colour ptColour = (activeIdx[i] == rootIdx ? pointColour_root : pointColour);
+            g.setColour (ptColour.withMultipliedAlpha (alphaMultiplier));
             g.fillEllipse (startPoint.x - pitchPoint_radius, startPoint.y - pitchPoint_radius, pitchPoint_diameter, pitchPoint_diameter);
         }
     }
@@ -131,7 +113,8 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         auto p = circleCenter.getPointOnCircumference (labelCircle_radius, angle);
         
         bool isActive = activeIdx.contains (i);
-        g.setColour (isActive ? pointColour : juce::Colours::darkgrey);
+        juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : juce::Colours::darkgrey);
+        g.setColour (textColour);
 
         labelCircle_rect.setCentre (p);
         g.drawText (circleNoteNames[i], labelCircle_rect, juce::Justification::centred);
@@ -143,7 +126,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         pitches += circleNoteNames[pitchIdx] + " ";
     }
     
-    g.setColour (juce::Colours::white);
+    g.setColour (juce::Colours::white.withMultipliedAlpha (alphaMultiplier));
     g.setFont (labelCircle_fontsize);
     
     labelCentre_rect.setCentre (circleCenter);

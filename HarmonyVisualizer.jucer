@@ -14,6 +14,7 @@
       <FILE id="nKp8dO" name="PluginEditor.cpp" compile="1" resource="0"
             file="Source/PluginEditor.cpp"/>
       <FILE id="P9PzFG" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
+      <FILE id="CbdH01" name="ChordBoundaryDetector.h" compile="0" resource="0" file="Source/ChordBoundaryDetector.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>
