@@ -1,11 +1,67 @@
-# Harmony Visualizer （仮称）
+# HarmonyVisualizer
 
-## About
+**HarmonyVisualizer** は、MIDI 入力された和音・単音を五度圏（Circle of Fifths）上に配置し、リアルタイムに幾何学的な図形として可視化するオーディオプラグイン／スタンドアロンアプリケーションです。
 
-- MIDI入力されたコード進行のビジュアライザー
-- コードネームに依存せず、構成音同士の関係のみを表示します
+従来のコードネーム表示に依存せず、ピッチクラス間のインターバル距離や和音の幾何学的対称性を直感的に把握できます。
 
-## Current Status
+---
 
-- Version: v0.1.0-alpha
-- できること: 2D空間での五度圏を用いた入力コードのリアルタイム表示
+## 主な特徴 (Features)
+
+- **五度圏へのリアルタイムプロット**: MIDI 入力されたノートのピッチクラスを即座に五度圏上にマッピング
+- **音程に応じた色彩表現**: 構成音間の五度圏上の距離（1〜6）に応じて、HSV カラーマップに基づいた線分を描画
+- **最低音（ベース/ルート）の強調表示**: 同時入力されたノートのうち、最低音のマーカーをハイライト表示
+- **レスポンシブ UI**: ウィンドウのリサイズに追従し、円の半径・フォントサイズ・線の太さが自動スケーリング
+- **マルチフォーマット対応**: macOS 向けの **Standalone アプリ** および **VST3 プラグイン** に対応
+
+---
+
+## 動作要件 (Requirements)
+
+- **OS**: macOS
+- **対応フォーマット**:
+  - Standalone アプリケーション
+  - VST3 プラグイン（Reaper、Logic Pro、AudioPluginHost などの VST3 対応 DAW）
+
+---
+
+## ビルド方法 (Build)
+
+macOS の Xcode コマンドラインツール（`xcodebuild`）を使用してビルドします。
+
+### 1. スタンドアロンアプリのビルドと起動
+
+```sh
+# Debug ビルド
+xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
+  -scheme "HarmonyVisualizer - Standalone Plugin" \
+  -configuration Debug build
+
+# アプリの起動
+open "Builds/MacOSX/build/Debug/HarmonyVisualizer(Debug).app"
+```
+
+### 2. VST3 プラグインのビルド
+
+```sh
+# VST3 プラグインのビルド
+xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
+  -scheme "HarmonyVisualizer - VST3" \
+  -configuration Debug build
+```
+
+生成された VST3 プラグインをお使いの DAW または `AudioPluginHost` に読み込ませて使用します。
+
+---
+
+## 開発について (Development)
+
+このリポジトリにおける開発フロー（Issue / ブランチ / コミット規約）、リアルタイム・オーディオセーフティ設計原則、プロジェクト構成については **[AGENTS.md](AGENTS.md)** を参照してください。
+
+---
+
+## 作成者 (Author)
+
+- **yuda**
+  - Website: [yuda.world](https://yuda.world)
+  - GitHub: [@yudasita](https://github.com/yudasita)
