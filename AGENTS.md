@@ -108,6 +108,16 @@ xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
 1. 作業開始前に開いている Issue を確認する（`gh issue list --state open`）。
 2. 着手する Issue の内容・背景・完了条件を読む（`gh issue view <番号>`）。
 3. 対応する Issue がない作業は、**必ず先に Issue を起票** し、作業内容・目的を明確にしてから着手する。起票前にユーザーへ確認を取る。
+4. **Issue の構造化・ラベル・依存関係の規約**:
+   - **ラベル体系**:
+     - `epic`: 複数の Issue をまとめる親・ロードマップ
+     - `priority: 高` / `priority: 中` / `priority: 低`: 優先度
+     - `wave:1` / `wave:2` / `wave:3`: 実装順序のフェーズ
+     - コンポーネントラベル: `audio`（音声/MIDI処理）、`engine`（音楽解析ロジック）、`render`（UI/描画）、`enhancement`、`bug`、`refactor`、`docs`
+   - **依存関係の明記**:
+     - 各 Issue の本文に「関連・依存関係」として `ロードマップ: #番号`、`blocked by: #番号`、`blocking: #番号` を明記する。
+   - **ロードマップ Issue の管理**:
+     - 大きな機能追加・マイルストーンごとに Mermaid 依存図（`graph LR`）、Wave 表、競合を避ける順序を記載したロードマップ Issue（`epic`）を作成・更新する。
 
 ### 5.2 ブランチを切る
 - `main` ブランチに直接コミットしない。
