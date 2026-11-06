@@ -79,29 +79,34 @@ int HarmonyVisualizerAudioProcessor::getCurrentProgram()
 
 void HarmonyVisualizerAudioProcessor::setCurrentProgram (int index)
 {
+    juce::ignoreUnused (index);
 }
 
 const juce::String HarmonyVisualizerAudioProcessor::getProgramName (int index)
 {
+    juce::ignoreUnused (index);
     return {};
 }
 
 void HarmonyVisualizerAudioProcessor::changeProgramName (int index, const juce::String& newName)
 {
+    juce::ignoreUnused (index, newName);
 }
 
 //==============================================================================
 void HarmonyVisualizerAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    juce::ignoreUnused (sampleRate, samplesPerBlock);
     reset();
 }
 
 void HarmonyVisualizerAudioProcessor::releaseResources()
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
+}
+
+void HarmonyVisualizerAudioProcessor::reset()
+{
+    midiFifo.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -130,40 +135,57 @@ bool HarmonyVisualizerAudioProcessor::isBusesLayoutSupported (const BusesLayout&
 }
 #endif
 
+void HarmonyVisualizerAudioProcessor::pushMidiEvent (const QueuedMidiEvent& event) noexcept
+{
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    midiFifo.prepareToWrite (1, start1, size1, start2, size2);
+
+    if (size1 > 0)
+        midiFifoBuffer[static_cast<size_t> (start1)] = event;
+    else if (size2 > 0)
+        midiFifoBuffer[static_cast<size_t> (start2)] = event;
+
+    midiFifo.finishedWrite (size1 + size2);
+}
+
 void HarmonyVisualizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    // これが呼ばれること自体がオーディオエンジン起動の証明
-    /*
-    static int counter = 0;
-    if (counter++ % 100 == 0) {
-        juce::Logger::writeToLog("Heartbeat: Audio Engine is running!");
-    }
-    */
     buffer.clear();
-    
-    // MIDIが来ているかチェック（デバッグ用）
-    if (!midiMessages.isEmpty())
-    {
-        int numMessages = midiMessages.getNumEvents();
-        juce::Logger::writeToLog("MIDI messages received: " + juce::String(numMessages));
-    }
-    
-    // 届いたMIDIメッセージを一つずつチェック
+
     for (const auto metadata : midiMessages)
     {
-        auto message = metadata.getMessage();
-        juce::ScopedLock sl (noteLock); // ロックをかける
-        
+        const auto message = metadata.getMessage();
+        const int sampleOffset = metadata.samplePosition;
+
+        QueuedMidiEvent event;
+        event.sampleOffset = sampleOffset;
+        event.channel = static_cast<uint8_t> (juce::jlimit (1, 16, message.getChannel()));
+
         if (message.isNoteOn())
         {
-            // 重複を避けて追加
-            if (std::find(activeNotes.begin(), activeNotes.end(), message.getNoteNumber()) == activeNotes.end())
-                activeNotes.push_back(message.getNoteNumber());
+            event.type = QueuedMidiEvent::Type::noteOn;
+            event.noteOrController = static_cast<uint8_t> (message.getNoteNumber());
+            event.value = static_cast<uint8_t> (message.getVelocity());
+            pushMidiEvent (event);
         }
         else if (message.isNoteOff())
         {
-            // リストから削除
-            activeNotes.erase(std::remove(activeNotes.begin(), activeNotes.end(), message.getNoteNumber()), activeNotes.end());
+            event.type = QueuedMidiEvent::Type::noteOff;
+            event.noteOrController = static_cast<uint8_t> (message.getNoteNumber());
+            event.value = static_cast<uint8_t> (message.getVelocity());
+            pushMidiEvent (event);
+        }
+        else if (message.isController())
+        {
+            event.type = QueuedMidiEvent::Type::controlChange;
+            event.noteOrController = static_cast<uint8_t> (message.getControllerNumber());
+            event.value = static_cast<uint8_t> (message.getControllerValue());
+            pushMidiEvent (event);
+        }
+        else if (message.isAllNotesOff() || message.isAllSoundOff())
+        {
+            event.type = QueuedMidiEvent::Type::allNotesOff;
+            pushMidiEvent (event);
         }
     }
 }
@@ -182,15 +204,12 @@ juce::AudioProcessorEditor* HarmonyVisualizerAudioProcessor::createEditor()
 //==============================================================================
 void HarmonyVisualizerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    juce::ignoreUnused (destData);
 }
 
 void HarmonyVisualizerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    juce::ignoreUnused (data, sizeInBytes);
 }
 
 //==============================================================================

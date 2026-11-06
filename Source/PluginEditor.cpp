@@ -8,17 +8,14 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
 
 //==============================================================================
 HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (HarmonyVisualizerAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
     setSize (400, 400);
-        
-    startTimerHz(60);
-    
+    startTimerHz (60);
     setResizable (true, true);
     setResizeLimits (300, 300, 1000, 1000);
 }
@@ -29,10 +26,37 @@ HarmonyVisualizerAudioProcessorEditor::~HarmonyVisualizerAudioProcessorEditor()
 }
 
 //==============================================================================
-
 void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 {
-    // 画面を再描画（paint関数を呼び出す）
+    // ロックフリーFIFOから未読イベントを取り出して現在の発音ノートを更新
+    audioProcessor.popMidiEvents ([this] (const QueuedMidiEvent& event)
+    {
+        const int noteNumber = static_cast<int> (event.noteOrController);
+
+        if (event.type == QueuedMidiEvent::Type::noteOn)
+        {
+            if (event.value > 0)
+            {
+                if (std::find (currentActiveNotes.begin(), currentActiveNotes.end(), noteNumber) == currentActiveNotes.end())
+                    currentActiveNotes.push_back (noteNumber);
+            }
+            else
+            {
+                currentActiveNotes.erase (std::remove (currentActiveNotes.begin(), currentActiveNotes.end(), noteNumber),
+                                          currentActiveNotes.end());
+            }
+        }
+        else if (event.type == QueuedMidiEvent::Type::noteOff)
+        {
+            currentActiveNotes.erase (std::remove (currentActiveNotes.begin(), currentActiveNotes.end(), noteNumber),
+                                      currentActiveNotes.end());
+        }
+        else if (event.type == QueuedMidiEvent::Type::allNotesOff)
+        {
+            currentActiveNotes.clear();
+        }
+    });
+
     repaint();
 }
 
@@ -40,34 +64,33 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (backgroundColour); // 背景
     
-    g.setColour(circleColour);
+    g.setColour (circleColour);
     g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleDiameter, circleDiameter, circleThickness);
 
-    // Processorから音を取得
-    std::vector<int> notes;
-    {
-        juce::ScopedLock sl (dynamic_cast<HarmonyVisualizerAudioProcessor&>(processor).getNoteLock());
-        notes = dynamic_cast<HarmonyVisualizerAudioProcessor&>(processor).getActiveNotes();
-    }
+    // UIスレッド内のアクティブノートを使用（排他ロック不要）
+    const std::vector<int> notes = currentActiveNotes;
 
     // 座標を計算してプロット
     juce::Array<int> activeIdx;
-    int rootNote;
-    int rootIdx;
+    int rootNote = -1;
+    int rootIdx = -1;
+
+    if (!notes.empty())
+    {
+        rootNote = *std::min_element (notes.begin(), notes.end());
+    }
     
     for (int note : notes)
     {
         int pc = note % 12; // オクターブを消す
         int circleIdx = (pc * 7) % 12; // 五度圏変換
-        //int circleIdx = pc;
         
         // まだ activeIdx に入っていない場合だけ追加
-        if (!activeIdx.contains(circleIdx)) {
-            activeIdx.add(circleIdx);
+        if (!activeIdx.contains (circleIdx)) {
+            activeIdx.add (circleIdx);
         }
         
-        if (note == *std::min_element(notes.begin(), notes.end())){
-            rootNote = note;
+        if (note == rootNote) {
             rootIdx = circleIdx;
         }
     }
@@ -76,20 +99,26 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     if (activeIdx.size() > 0)
     {
         for (int i = 0; i < activeIdx.size(); ++i) {
-            juce::Point<float> startPoint = circleCenter.getPointOnCircumference(circleRadius, getAngle(activeIdx[i]));
+            juce::Point<float> startPoint = circleCenter.getPointOnCircumference (circleRadius, getAngle (activeIdx[i]));
             
-            for (int j = i+1; j < activeIdx.size(); ++j) {
-                int dist = std::abs(activeIdx[i] - activeIdx[j]);
-                if (dist > 6) dist = 12 - dist;
+            for (int j = i + 1; j < activeIdx.size(); ++j) {
+                int dist = std::abs (activeIdx[i] - activeIdx[j]);
+                if (dist > 6)
+                    dist = 12 - dist;
                 
-                juce::Point<float> endPoint = circleCenter.getPointOnCircumference(circleRadius, getAngle(activeIdx[j]));
+                juce::Point<float> endPoint = circleCenter.getPointOnCircumference (circleRadius, getAngle (activeIdx[j]));
                 
-                g.setColour(pitchLine_colours.find(dist)->second);
-                g.drawLine(juce::Line<float>(startPoint, endPoint), pitchLine_thickness);
+                auto it = pitchLine_colours.find (dist);
+                if (it != pitchLine_colours.end())
+                    g.setColour (it->second);
+                else
+                    g.setColour (juce::Colours::white);
+
+                g.drawLine (juce::Line<float> (startPoint, endPoint), pitchLine_thickness);
             }
             
-            g.setColour(activeIdx[i] == rootIdx ? pointColour_root : pointColour);
-            g.fillEllipse(startPoint.x - pitchPoint_radius, startPoint.y - pitchPoint_radius, pitchPoint_diameter, pitchPoint_diameter);
+            g.setColour (activeIdx[i] == rootIdx ? pointColour_root : pointColour);
+            g.fillEllipse (startPoint.x - pitchPoint_radius, startPoint.y - pitchPoint_radius, pitchPoint_diameter, pitchPoint_diameter);
         }
     }
     
@@ -98,10 +127,10 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 
     for (int i = 0; i < 12; ++i)
     {
-        float angle = getAngle(i);
+        float angle = getAngle (i);
         auto p = circleCenter.getPointOnCircumference (labelCircle_radius, angle);
         
-        bool isActive = activeIdx.contains(i);
+        bool isActive = activeIdx.contains (i);
         g.setColour (isActive ? pointColour : juce::Colours::darkgrey);
 
         labelCircle_rect.setCentre (p);
@@ -118,28 +147,27 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont (labelCircle_fontsize);
     
     labelCentre_rect.setCentre (circleCenter);
-    
     g.drawText (pitches.trim(), labelCentre_rect, juce::Justification::centred);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::resized()
 {
-    drawingArea = getLocalBounds().toFloat().reduced(0.0f);
+    drawingArea = getLocalBounds().toFloat().reduced (0.0f);
     
     circleCenter = drawingArea.getCentre();
-    circleRadius = juce::jmin(drawingArea.getWidth(), drawingArea.getHeight()) * 0.4f;
-    circleDiameter = 2 * circleRadius;
-    circleThickness = 0.02f / 3 * circleRadius;
+    circleRadius = juce::jmin (drawingArea.getWidth(), drawingArea.getHeight()) * 0.4f;
+    circleDiameter = 2.0f * circleRadius;
+    circleThickness = 0.02f / 3.0f * circleRadius;
     
-    labelCircle_rect = {0.15f * circleRadius, 0.15f * circleRadius};
+    labelCircle_rect = { 0.15f * circleRadius, 0.15f * circleRadius };
     labelCircle_fontsize = 0.1f * circleRadius;
     labelCircle_radius = 1.1f * circleRadius;
     
     pitchLine_thickness = 0.01f * circleRadius;
     
     pitchPoint_radius = 0.02f * circleRadius;
-    pitchPoint_diameter = 2 * pitchPoint_radius;
+    pitchPoint_diameter = 2.0f * pitchPoint_radius;
     
     labelCentre_fontsize = 0.1f * circleRadius;
-    labelCentre_rect = {circleDiameter, 0.6f * circleRadius};
+    labelCentre_rect = { circleDiameter, 0.6f * circleRadius };
 }
