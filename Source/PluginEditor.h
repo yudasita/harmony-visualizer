@@ -14,6 +14,7 @@
 #include "ChordEvent.h"
 #include "ChordHistoryQueue.h"
 #include "PerspectiveProjection.h"
+#include "VoiceLeadingSolver.h"
 #include <array>
 #include <vector>
 
