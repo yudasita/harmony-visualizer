@@ -1,2 +1,38 @@
-**/Builds
-**/JuceLibraryCode
+# ==========================================
+# macOS
+# ==========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ==========================================
+# Xcode / Apple Build Artifacts & User Data
+# ==========================================
+**/build/
+**/DerivedData/
+*.xcuserstate
+project.xcworkspace/xcuserdata/
+xcuserdata/
+*.moved-aside
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ==========================================
+# JUCE / Build Outputs & Bundles
+# ==========================================
+*.app/
+*.vst3/
+*.component/
+*.zip
+juce_vst3_helper
+*.a
+
+# ==========================================
+# Other IDEs & Temporary Files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*~
