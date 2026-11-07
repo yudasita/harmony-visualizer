@@ -10,6 +10,9 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include <unordered_map>
+#include <vector>
+
 //==============================================================================
 /**
 */
@@ -30,31 +33,34 @@ private:
     // access the processor object that created it.
     HarmonyVisualizerAudioProcessor& audioProcessor;
     
+    std::vector<int> currentActiveNotes;
+
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;
-    float circleRadius;
-    float circleDiameter;
-    float circleThickness;
+    float circleRadius { 0.0f };
+    float circleDiameter { 0.0f };
+    float circleThickness { 0.0f };
+
     juce::Rectangle<float> labelCircle_rect;
-    float labelCircle_fontsize;
-    float labelCircle_radius;
-    float pitchLine_thickness;
-    float pitchPoint_radius;
-    float pitchPoint_diameter;
+    float labelCircle_fontsize { 0.0f };
+    float labelCircle_radius { 0.0f };
+
+    float pitchLine_thickness { 0.0f };
+    float pitchPoint_radius { 0.0f };
+    float pitchPoint_diameter { 0.0f };
     
     juce::Rectangle<float> labelCentre_rect;
-    float labelCentre_fontsize;
+    float labelCentre_fontsize { 0.0f };
     
     // 五度圏順（Cから時計回り）の音名
     const juce::StringArray circleNoteNames
         { "C", "G", "D", "A", "E", "B", "Gb", "Db", "Ab", "Eb", "Bb", "F" };
-        //{ "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
-    
+
     const std::unordered_map<juce::String, juce::Array<int>> triad = {
         { "major", {0, 1, 4} },
         { "minor", {0, 1, 9} },
-        { "dim", {0, 1, 9} },
-        { "aug", {0, 8, 4} },
+        { "dim",   {0, 1, 9} },
+        { "aug",   {0, 8, 4} },
     };
     
     const juce::Colour backgroundColour = juce::Colours::black;
@@ -71,11 +77,12 @@ private:
         { 3, juce::Colour::fromHSV (0.33f, lineS, lineV, lineA) },
         { 4, juce::Colour::fromHSV (0.22f, lineS, lineV, lineA) },
         { 5, juce::Colour::fromHSV (0.07f, lineS, lineV, lineA) },
-        { 6, juce::Colour::fromHSV (0.0f, lineS, lineV, lineA) },
+        { 6, juce::Colour::fromHSV (0.0f,  lineS, lineV, lineA) },
     };
     
-    float getAngle(int circleIdx){
-        return juce::MathConstants<float>::twoPi * circleIdx / 12.0f;;
+    float getAngle (int circleIdx) const
+    {
+        return juce::MathConstants<float>::twoPi * static_cast<float> (circleIdx) / 12.0f;
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HarmonyVisualizerAudioProcessorEditor)
