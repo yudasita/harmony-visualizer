@@ -383,11 +383,13 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     if (chord.circleIndices.empty())
         return;
 
-    const float lineThickness = projection.getProjectedSize (pitchLine_thickness, z, 0.3f);
+    const float defaultLineThickness = projection.getProjectedSize (pitchLine_thickness, z, 0.3f);
     const float ptRadius = projection.getProjectedSize (pitchPoint_radius, z, 0.35f);
     const float ptDiameter = ptRadius * 2.0f;
 
     // 3. 構成音間のインターバル線と頂点ポイントを透視投影座標で描画
+    // 奥に行った過去コードでも、トライトーン（dist=6）や短2度（dist=5）などの緊張音程は
+    // 安定音程より減衰を抑え、奥でも明瞭に目立たせる
     for (size_t i = 0; i < chord.circleIndices.size(); ++i)
     {
         const int idxA = chord.circleIndices[i];
@@ -401,9 +403,35 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
                 dist = 12 - dist;
 
             const juce::Point<float> endPoint = projection.projectCircleIndex (idxB, z, 1.0f);
+            const juce::Line<float> intervalLine (startPoint, endPoint);
 
-            g.setColour (getIntervalColour (dist, effectiveAlpha));
-            g.drawLine (juce::Line<float> (startPoint, endPoint), lineThickness);
+            float lineAlpha = effectiveAlpha;
+            float lineThickness = defaultLineThickness;
+
+            if (!isForeground)
+            {
+                if (dist == 6) // トライトーン（最大緊張）: 奥に行っても強く残し、グローも付与
+                {
+                    lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.6f);
+                    lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.5f, z, 0.45f);
+
+                    // トライトーン用のソフトな発光グロー
+                    g.setColour (pitchLine_colours[6].withMultipliedAlpha (lineAlpha * 0.35f));
+                    g.drawLine (intervalLine, lineThickness * 2.4f);
+                }
+                else if (dist == 5) // 半音緊張（短2度/長7度）: やや粘り強く残す
+                {
+                    lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.3f);
+                    lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.25f, z, 0.40f);
+                }
+                else // 安定音程（完全5度/4度、長短3度/6度など）: 奥へ行くほどスッとフェードアウト
+                {
+                    lineAlpha = effectiveAlpha * 0.55f;
+                }
+            }
+
+            g.setColour (getIntervalColour (dist, lineAlpha));
+            g.drawLine (intervalLine, lineThickness);
         }
 
         const juce::Colour ptColour = (idxA == chord.bassCircleIndex ? pointColour_root : pointColour);
