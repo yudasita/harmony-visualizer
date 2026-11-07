@@ -15,6 +15,13 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
     setSize (400, 400);
+
+    // 新コード確定時の履歴キュー追加コールバック
+    chordDetector.setNewChordCallback ([this] (const std::vector<int>& notes)
+    {
+        ChordEvent newChord = ChordEvent::fromMidiNotes (notes);
+        chordHistory.pushChord (std::move (newChord));
+    });
     startTimerHz (60);
     setResizable (true, true);
     setResizeLimits (300, 300, 1000, 1000);
@@ -37,6 +44,9 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
     });
 
     chordDetector.update (currentTimeMs);
+
+    // コード履歴キューのアニメーション更新
+    chordHistory.updateAnimation (0.2f);
 
     repaint();
 }
