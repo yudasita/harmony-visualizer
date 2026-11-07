@@ -43,8 +43,18 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 
 void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (backgroundColour); // 背景
+    g.fillAll (backgroundColour); // 背景（スレートチャコール）
     
+    // 中心クロスヘア（目盛）＆ガイドドット（スタジオアナライザーの計器感・将来の多層トンネルと干渉しない）
+    g.setColour (guideGridColour);
+    const float crossLength = circleRadius * 0.06f;
+    g.drawLine (circleCenter.x - crossLength, circleCenter.y, circleCenter.x + crossLength, circleCenter.y, circleThickness * 0.8f);
+    g.drawLine (circleCenter.x, circleCenter.y - crossLength, circleCenter.x, circleCenter.y + crossLength, circleThickness * 0.8f);
+
+    const float centerDotRadius = circleThickness * 1.2f;
+    g.fillEllipse (circleCenter.x - centerDotRadius, circleCenter.y - centerDotRadius, centerDotRadius * 2.0f, centerDotRadius * 2.0f);
+    
+    // メイン五度圏リング
     g.setColour (circleColour);
     g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleDiameter, circleDiameter, circleThickness);
 
@@ -78,6 +88,18 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         }
     }
 
+    // 12音位置の控えめなガイドドット（未発音の位置関係を把握しやすくする）
+    const float guideDotRadius = pitchPoint_radius * 0.35f;
+    for (int i = 0; i < 12; ++i)
+    {
+        if (!activeIdx.contains (i))
+        {
+            auto p = circleCenter.getPointOnCircumference (circleRadius, getAngle (i));
+            g.setColour (inactiveDotColour);
+            g.fillEllipse (p.x - guideDotRadius, p.y - guideDotRadius, guideDotRadius * 2.0f, guideDotRadius * 2.0f);
+        }
+    }
+
     // 線で結ぶ
     if (activeIdx.size() > 0)
     {
@@ -91,10 +113,8 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
                 
                 juce::Point<float> endPoint = circleCenter.getPointOnCircumference (circleRadius, getAngle (activeIdx[j]));
                 
-                auto it = pitchLine_colours.find (dist);
-                juce::Colour lineColour = (it != pitchLine_colours.end() ? it->second : juce::Colours::white);
-                g.setColour (lineColour.withMultipliedAlpha (alphaMultiplier));
-
+                // 深度・アルファ対応のカラー取得ヘルパー関数を使用
+                g.setColour (getIntervalColour (dist, alphaMultiplier));
                 g.drawLine (juce::Line<float> (startPoint, endPoint), pitchLine_thickness);
             }
             
@@ -113,7 +133,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         auto p = circleCenter.getPointOnCircumference (labelCircle_radius, angle);
         
         bool isActive = activeIdx.contains (i);
-        juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : juce::Colours::darkgrey);
+        juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : inactiveNoteColour);
         g.setColour (textColour);
 
         labelCircle_rect.setCentre (p);
@@ -126,7 +146,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         pitches += circleNoteNames[pitchIdx] + " ";
     }
     
-    g.setColour (juce::Colours::white.withMultipliedAlpha (alphaMultiplier));
+    g.setColour (centerTextColour.withMultipliedAlpha (alphaMultiplier));
     g.setFont (labelCircle_fontsize);
     
     labelCentre_rect.setCentre (circleCenter);
