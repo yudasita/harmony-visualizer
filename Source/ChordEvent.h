@@ -23,6 +23,7 @@ struct ChordEvent
     std::vector<int> midiNotes;                     // 生MIDIノート番号一覧（ソート済み）
     std::vector<int> pitchClasses;                  // ピッチクラス（0〜11、重複排除済み）
     std::vector<int> circleIndices;                 // 五度圏インデックス（0〜11、重複排除済み）
+    uint16_t circleMask { 0 };                     // 五度圏ビットマスク（ビット0〜11、O(1)描画判定用）
 
     int bassNote { -1 };                           // 最低音（ベースノート番号）
     int bassCircleIndex { -1 };                    // 最低音の五度圏インデックス
@@ -37,6 +38,11 @@ struct ChordEvent
     bool isEmpty() const noexcept
     {
         return midiNotes.empty();
+    }
+
+    bool hasCircleIndex (int circleIdx) const noexcept
+    {
+        return (circleIdx >= 0 && circleIdx < 12) && ((circleMask & (1u << circleIdx)) != 0);
     }
 
     /**
@@ -66,7 +72,10 @@ struct ChordEvent
                 uniquePcs.push_back (pc);
 
             if (std::find (uniqueCircles.begin(), uniqueCircles.end(), circleIdx) == uniqueCircles.end())
+            {
                 uniqueCircles.push_back (circleIdx);
+                chord.circleMask |= static_cast<uint16_t> (1u << circleIdx);
+            }
         }
 
         std::sort (uniquePcs.begin(), uniquePcs.end());

@@ -124,29 +124,33 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
     for (int i = 0; i < 12; ++i)
     {
         const auto p = projection.projectCircleIndex (i, 0.0f, 1.1f);
-        const bool isActive = std::find (foregroundChord.circleIndices.begin(),
-                                         foregroundChord.circleIndices.end(),
-                                         i) != foregroundChord.circleIndices.end();
+        const bool isActive = foregroundChord.hasCircleIndex (i);
 
         juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : inactiveNoteColour);
         g.setColour (textColour);
 
-        labelCircle_rect.setCentre (p);
-        g.drawText (circleNoteNames[i], labelCircle_rect, juce::Justification::centred);
+        const juce::Rectangle<float> labelBounds (p.x - labelCircle_size * 0.5f,
+                                                 p.y - labelCircle_size * 0.5f,
+                                                 labelCircle_size,
+                                                 labelCircle_size);
+        g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
     }
 
     // 中央の構成音テキスト表示
-    juce::String pitches = "";
+    juce::String pitches;
     for (int pitchIdx : foregroundChord.circleIndices)
     {
-        pitches += circleNoteNames[pitchIdx] + " ";
+        pitches << circleNoteNames[pitchIdx] << ' ';
     }
 
     g.setColour (centerTextColour.withMultipliedAlpha (alphaMultiplier));
     g.setFont (labelCentre_fontsize);
 
-    labelCentre_rect.setCentre (circleCenter);
-    g.drawText (pitches.trim(), labelCentre_rect, juce::Justification::centred);
+    const juce::Rectangle<float> centerRect (circleCenter.x - circleRadius,
+                                             circleCenter.y - labelCentre_height * 0.5f,
+                                             circleDiameter,
+                                             labelCentre_height);
+    g.drawText (pitches.trim(), centerRect, juce::Justification::centred);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
@@ -173,16 +177,14 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     if (isForeground)
     {
         const float guideDotRadius = pitchPoint_radius * 0.35f;
+        const float guideDotDiameter = guideDotRadius * 2.0f;
         for (int i = 0; i < 12; ++i)
         {
-            const bool isActive = std::find (chord.circleIndices.begin(),
-                                             chord.circleIndices.end(),
-                                             i) != chord.circleIndices.end();
-            if (!isActive)
+            if (!chord.hasCircleIndex (i))
             {
                 const auto p = projection.projectCircleIndex (i, 0.0f, 1.0f);
                 g.setColour (inactiveDotColour);
-                g.fillEllipse (p.x - guideDotRadius, p.y - guideDotRadius, guideDotRadius * 2.0f, guideDotRadius * 2.0f);
+                g.fillEllipse (p.x - guideDotRadius, p.y - guideDotRadius, guideDotDiameter, guideDotDiameter);
             }
         }
     }
@@ -231,15 +233,14 @@ void HarmonyVisualizerAudioProcessorEditor::resized()
     // ウィンドウサイズに応じて3D透視投影の基準パラメータを更新
     projection.setViewport (circleCenter, circleRadius, 0.28f);
     
-    labelCircle_rect = { 0.15f * circleRadius, 0.15f * circleRadius };
+    labelCircle_size = 0.15f * circleRadius;
     labelCircle_fontsize = 0.1f * circleRadius;
-    labelCircle_radius = 1.1f * circleRadius;
     
     pitchLine_thickness = 0.01f * circleRadius;
     
     pitchPoint_radius = 0.02f * circleRadius;
     pitchPoint_diameter = 2.0f * pitchPoint_radius;
     
+    labelCentre_height = 0.6f * circleRadius;
     labelCentre_fontsize = 0.1f * circleRadius;
-    labelCentre_rect = { circleDiameter, 0.6f * circleRadius };
 }
