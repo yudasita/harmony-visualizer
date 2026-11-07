@@ -309,7 +309,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
     // 最前面のリング・ガイドドット・インターバル多角形・構成音ポイントを描画
     drawChordRingAndPolygon (g, foregroundChord, alphaMultiplier, true);
 
-    // 最前面（Z=0）のみ外周の12音名ラベルと中央の構成音テキストを描画
+    // 最前面（Z=0）のみ外周の12音名ラベルを描画（中央テキストは廃止し3Dタイムトンネルの消失点視認性を確保）
     g.setFont (labelCircle_fontsize);
 
     for (int i = 0; i < 12; ++i)
@@ -326,22 +326,6 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
                                                  labelCircle_size);
         g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
     }
-
-    // 中央の構成音テキスト表示
-    juce::String pitches;
-    for (int pitchIdx : foregroundChord.circleIndices)
-    {
-        pitches << circleNoteNames[pitchIdx] << ' ';
-    }
-
-    g.setColour (centerTextColour.withMultipliedAlpha (alphaMultiplier));
-    g.setFont (labelCentre_fontsize);
-
-    const juce::Rectangle<float> centerRect (circleCenter.x - circleRadius,
-                                             circleCenter.y - labelCentre_height * 0.5f,
-                                             circleDiameter,
-                                             labelCentre_height);
-    g.drawText (pitches.trim(), centerRect, juce::Justification::centred);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
@@ -459,7 +443,4 @@ void HarmonyVisualizerAudioProcessorEditor::resized()
     
     pitchPoint_radius = 0.02f * circleRadius;
     pitchPoint_diameter = 2.0f * pitchPoint_radius;
-    
-    labelCentre_height = 0.6f * circleRadius;
-    labelCentre_fontsize = 0.1f * circleRadius;
 }
