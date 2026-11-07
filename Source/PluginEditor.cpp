@@ -43,8 +43,18 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 
 void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (backgroundColour); // 背景
+    g.fillAll (backgroundColour); // 背景（スレートチャコール）
     
+    // 繊細なインナーガイドリング（高級スタジオ機材の精密感）
+    g.setColour (guideGridColour);
+    const float innerRadius = circleRadius * 0.5f;
+    g.drawEllipse (circleCenter.x - innerRadius, circleCenter.y - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f, circleThickness * 0.8f);
+
+    // 中心ガイドドット
+    const float centerDotRadius = circleThickness * 1.5f;
+    g.fillEllipse (circleCenter.x - centerDotRadius, circleCenter.y - centerDotRadius, centerDotRadius * 2.0f, centerDotRadius * 2.0f);
+    
+    // メイン五度圏リング
     g.setColour (circleColour);
     g.drawEllipse (circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleDiameter, circleDiameter, circleThickness);
 
@@ -75,6 +85,18 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         
         if (note == rootNote) {
             rootIdx = circleIdx;
+        }
+    }
+
+    // 12音位置の控えめなガイドドット（未発音の位置関係を把握しやすくする）
+    const float guideDotRadius = pitchPoint_radius * 0.35f;
+    for (int i = 0; i < 12; ++i)
+    {
+        if (!activeIdx.contains (i))
+        {
+            auto p = circleCenter.getPointOnCircumference (circleRadius, getAngle (i));
+            g.setColour (inactiveDotColour);
+            g.fillEllipse (p.x - guideDotRadius, p.y - guideDotRadius, guideDotRadius * 2.0f, guideDotRadius * 2.0f);
         }
     }
 
@@ -113,7 +135,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         auto p = circleCenter.getPointOnCircumference (labelCircle_radius, angle);
         
         bool isActive = activeIdx.contains (i);
-        juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : juce::Colours::darkgrey);
+        juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : inactiveNoteColour);
         g.setColour (textColour);
 
         labelCircle_rect.setCentre (p);
@@ -126,7 +148,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
         pitches += circleNoteNames[pitchIdx] + " ";
     }
     
-    g.setColour (juce::Colours::white.withMultipliedAlpha (alphaMultiplier));
+    g.setColour (centerTextColour.withMultipliedAlpha (alphaMultiplier));
     g.setFont (labelCircle_fontsize);
     
     labelCentre_rect.setCentre (circleCenter);

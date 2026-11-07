@@ -66,21 +66,30 @@ private:
         { "aug",   {0, 8, 4} },
     };
     
-    const juce::Colour backgroundColour = juce::Colours::black;
-    const juce::Colour circleColour = juce::Colours::darkgrey;
-    const juce::Colour pointColour_root = juce::Colours::orangered;
-    const juce::Colour pointColour = juce::Colours::white;
+    // Studio Professional / Dark Slate カラーパレット
+    const juce::Colour backgroundColour   { 0xff141720 }; // 深みのあるスレートチャコール
+    const juce::Colour circleColour       { 0xff2a3142 }; // 五度圏メインリング
+    const juce::Colour guideGridColour    { 0x18ffffff }; // 繊細な補助グリッド・インナーリング
+    const juce::Colour inactiveNoteColour { 0xff5a6378 }; // 未発音の音名テキスト
+    const juce::Colour inactiveDotColour  { 0xff252b38 }; // 未発音の12音ガイドドット
+    const juce::Colour pointColour_root   { 0xffff5a5f }; // ルート音（洗練されたコーラルアクセント）
+    const juce::Colour pointColour        { 0xfff1f5f9 }; // 通常の構成音（クリーンオフホワイト）
+    const juce::Colour centerTextColour   { 0xffe2e8f0 }; // 中央の構成音表示テキスト
     
-    const float lineS = 0.5f;
-    const float lineV = 1.0f;
-    const float lineA = 1.0f;
+    // 五度圏上の距離（1〜6）に応じたインターバルカラー（Studio Slate 調和パレット）
+    // 1: 完全5度/4度 (最協和) -> クールシアン
+    // 2: 長2度/短7度 (モード) -> ウォームアンバー
+    // 3: 短3度/長6度 (マイナー) -> セージグリーン
+    // 4: 長3度/短6度 (メジャー) -> ミントライム
+    // 5: 短2度/長7度 (半音緊張) -> ビビッドタンジェリン
+    // 6: 増4度/減5度 (トライトーン) -> クリムゾンローズ
     const std::unordered_map<int, juce::Colour> pitchLine_colours = {
-        { 1, juce::Colour::fromHSV (0.67f, lineS, lineV, lineA) },
-        { 2, juce::Colour::fromHSV (0.07f, lineS, lineV, lineA) },
-        { 3, juce::Colour::fromHSV (0.33f, lineS, lineV, lineA) },
-        { 4, juce::Colour::fromHSV (0.22f, lineS, lineV, lineA) },
-        { 5, juce::Colour::fromHSV (0.07f, lineS, lineV, lineA) },
-        { 6, juce::Colour::fromHSV (0.0f,  lineS, lineV, lineA) },
+        { 1, juce::Colour (0xff38bdf8) },
+        { 2, juce::Colour (0xfffbbf24) },
+        { 3, juce::Colour (0xff34d399) },
+        { 4, juce::Colour (0xffa3e635) },
+        { 5, juce::Colour (0xfff97316) },
+        { 6, juce::Colour (0xfff43f5e) },
     };
     
     float getAngle (int circleIdx) const
