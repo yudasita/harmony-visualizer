@@ -88,9 +88,6 @@ private:
     float pitchPoint_radius { 0.0f };
     float pitchPoint_diameter { 0.0f };
     
-    float labelCentre_height { 0.0f };
-    float labelCentre_fontsize { 0.0f };
-    
     // 五度圏順（Cから時計回り）の音名
     const juce::StringArray circleNoteNames
         { "C", "G", "D", "A", "E", "B", "Gb", "Db", "Ab", "Eb", "Bb", "F" };
@@ -103,7 +100,6 @@ private:
     const juce::Colour inactiveDotColour  { 0xff252b38 }; // 未発音の12音ガイドドット
     const juce::Colour pointColour_root   { 0xffff5a5f }; // ルート音（洗練されたコーラルアクセント）
     const juce::Colour pointColour        { 0xfff1f5f9 }; // 通常の構成音（クリーンオフホワイト）
-    const juce::Colour centerTextColour   { 0xffe2e8f0 }; // 中央の構成音表示テキスト
     
     // 五度圏上の距離（1〜6）に応じたインターバルカラー（Studio Slate 調和パレット）
     // 0: 未使用
