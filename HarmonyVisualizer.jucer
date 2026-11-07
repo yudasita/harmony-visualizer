@@ -17,6 +17,7 @@
       <FILE id="CbdH01" name="ChordBoundaryDetector.h" compile="0" resource="0" file="Source/ChordBoundaryDetector.h"/>
       <FILE id="ChdEv1" name="ChordEvent.h" compile="0" resource="0" file="Source/ChordEvent.h"/>
       <FILE id="ChdHQ1" name="ChordHistoryQueue.h" compile="0" resource="0" file="Source/ChordHistoryQueue.h"/>
+      <FILE id="PrsPj1" name="PerspectiveProjection.h" compile="0" resource="0" file="Source/PerspectiveProjection.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>
