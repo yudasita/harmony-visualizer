@@ -70,7 +70,8 @@ private:
                                        float fromZ,
                                        float toZ,
                                        float fromAlpha,
-                                       float toAlpha);
+                                       float toAlpha,
+                                       bool isLatestTransition);
     void drawForegroundChordLayer (juce::Graphics& g);
     void drawChordRingAndPolygon (juce::Graphics& g, const ChordEvent& chord, float effectiveAlpha, bool isForeground);
 
