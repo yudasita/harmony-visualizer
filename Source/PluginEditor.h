@@ -31,6 +31,18 @@ public:
 
     ChordBoundaryDetector& getChordDetector() noexcept { return chordDetector; }
 
+    /**
+     * 五度圏上の距離（1〜6）に応じたインターバルカラーを取得
+     * @param dist 五度圏上の距離（1〜6）
+     * @param depthAlpha 深度フェードやアクティブ状態に応じたアルファ倍率（0.0f〜1.0f）
+     */
+    juce::Colour getIntervalColour (int dist, float depthAlpha = 1.0f) const
+    {
+        auto it = pitchLine_colours.find (dist);
+        juce::Colour baseColour = (it != pitchLine_colours.end() ? it->second : juce::Colours::white);
+        return baseColour.withMultipliedAlpha (juce::jlimit (0.0f, 1.0f, depthAlpha));
+    }
+
 private:
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
@@ -69,7 +81,7 @@ private:
     // Studio Professional / Dark Slate カラーパレット
     const juce::Colour backgroundColour   { 0xff141720 }; // 深みのあるスレートチャコール
     const juce::Colour circleColour       { 0xff2a3142 }; // 五度圏メインリング
-    const juce::Colour guideGridColour    { 0x18ffffff }; // 繊細な補助グリッド・インナーリング
+    const juce::Colour guideGridColour    { 0x24ffffff }; // 中心クロスヘア・ガイド目盛
     const juce::Colour inactiveNoteColour { 0xff5a6378 }; // 未発音の音名テキスト
     const juce::Colour inactiveDotColour  { 0xff252b38 }; // 未発音の12音ガイドドット
     const juce::Colour pointColour_root   { 0xffff5a5f }; // ルート音（洗練されたコーラルアクセント）

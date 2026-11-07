@@ -45,13 +45,13 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (backgroundColour); // 背景（スレートチャコール）
     
-    // 繊細なインナーガイドリング（高級スタジオ機材の精密感）
+    // 中心クロスヘア（目盛）＆ガイドドット（スタジオアナライザーの計器感・将来の多層トンネルと干渉しない）
     g.setColour (guideGridColour);
-    const float innerRadius = circleRadius * 0.5f;
-    g.drawEllipse (circleCenter.x - innerRadius, circleCenter.y - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f, circleThickness * 0.8f);
+    const float crossLength = circleRadius * 0.06f;
+    g.drawLine (circleCenter.x - crossLength, circleCenter.y, circleCenter.x + crossLength, circleCenter.y, circleThickness * 0.8f);
+    g.drawLine (circleCenter.x, circleCenter.y - crossLength, circleCenter.x, circleCenter.y + crossLength, circleThickness * 0.8f);
 
-    // 中心ガイドドット
-    const float centerDotRadius = circleThickness * 1.5f;
+    const float centerDotRadius = circleThickness * 1.2f;
     g.fillEllipse (circleCenter.x - centerDotRadius, circleCenter.y - centerDotRadius, centerDotRadius * 2.0f, centerDotRadius * 2.0f);
     
     // メイン五度圏リング
@@ -113,10 +113,8 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
                 
                 juce::Point<float> endPoint = circleCenter.getPointOnCircumference (circleRadius, getAngle (activeIdx[j]));
                 
-                auto it = pitchLine_colours.find (dist);
-                juce::Colour lineColour = (it != pitchLine_colours.end() ? it->second : juce::Colours::white);
-                g.setColour (lineColour.withMultipliedAlpha (alphaMultiplier));
-
+                // 深度・アルファ対応のカラー取得ヘルパー関数を使用
+                g.setColour (getIntervalColour (dist, alphaMultiplier));
                 g.drawLine (juce::Line<float> (startPoint, endPoint), pitchLine_thickness);
             }
             
