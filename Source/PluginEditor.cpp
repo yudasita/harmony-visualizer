@@ -104,8 +104,8 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
     if (chords.size() <= 1)
         return;
 
-    const auto& chordState = chordDetector.getCurrentChordState();
-    const float fgAlpha = chordState.isDimmed ? 0.35f : 1.0f;
+    // 離鍵時も最前面コードの明瞭さを維持し、奥との前後関係が逆転しないようにする（fgAlpha = 1.0f）
+    constexpr float fgAlpha = 1.0f;
 
     // 世代間のボイスリーディング遷移ライン（光の糸）を奥（末尾）から手前（index 0）へ順に描画
     for (size_t idx = chords.size() - 1; idx >= 1; --idx)
@@ -299,7 +299,8 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
 void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Graphics& g)
 {
     const auto& chordState = chordDetector.getCurrentChordState();
-    const float alphaMultiplier = chordState.isDimmed ? 0.35f : 1.0f;
+    // 離鍵時も最前面コード全体のアルファは 1.0f を維持し、1つ奥の世代より薄くなる逆転現象を防ぐ
+    constexpr float alphaMultiplier = 1.0f;
 
     ChordEvent foregroundChord = ChordEvent::fromMidiNotes (chordState.notes);
     foregroundChord.zPosition = 0.0f;
@@ -309,22 +310,59 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
     // 最前面のリング・ガイドドット・インターバル多角形・構成音ポイントを描画
     drawChordRingAndPolygon (g, foregroundChord, alphaMultiplier, true);
 
-    // 最前面（Z=0）のみ外周の12音名ラベルを描画（中央テキストは廃止し3Dタイムトンネルの消失点視認性を確保）
-    g.setFont (labelCircle_fontsize);
+    // 最前面（Z=0）の外周12音名ラベルを描画（中央テキストは廃止し3Dタイムトンネルの消失点視認性を確保）
+    const juce::Font regularFont (juce::FontOptions (labelCircle_fontsize, juce::Font::plain));
+    const juce::Font boldFont    (juce::FontOptions (labelCircle_fontsize * 1.06f, juce::Font::bold));
 
     for (int i = 0; i < 12; ++i)
     {
         const auto p = projection.projectCircleIndex (i, 0.0f, 1.1f);
-        const bool isActive = foregroundChord.hasCircleIndex (i);
-
-        juce::Colour textColour = (isActive ? pointColour.withMultipliedAlpha (alphaMultiplier) : inactiveNoteColour);
-        g.setColour (textColour);
+        const bool isInChord  = foregroundChord.hasCircleIndex (i);
+        const bool isSounding = chordDetector.isCircleIndexSounding (i);
+        const bool isBass     = (i == foregroundChord.bassCircleIndex);
 
         const juce::Rectangle<float> labelBounds (p.x - labelCircle_size * 0.5f,
                                                  p.y - labelCircle_size * 0.5f,
                                                  labelCircle_size,
                                                  labelCircle_size);
-        g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
+
+        if (isSounding)
+        {
+            // 現在押鍵中（またはペダル保持中）のアクティブ音：ネオングロー＋太字ハイライト
+            const juce::Colour glowBase = isBass ? pointColour_root : juce::Colour (0xff38bdf8);
+
+            // 外周ソフトネオングロー（ラジアルグラデーション）
+            const float glowRadius = labelCircle_size * 0.62f;
+            juce::ColourGradient labelGlow (
+                glowBase.withAlpha (0.36f), p.x, p.y,
+                glowBase.withAlpha (0.0f),  p.x + glowRadius, p.y,
+                true);
+            labelGlow.addColour (0.45, glowBase.withAlpha (0.16f));
+            g.setGradientFill (labelGlow);
+            g.fillEllipse (p.x - glowRadius, p.y - glowRadius, glowRadius * 2.0f, glowRadius * 2.0f);
+
+            // リング上の頂点ポイントにも発音中の光彩オーラを付与
+            const auto ringPt = projection.projectCircleIndex (i, 0.0f, 1.0f);
+            const float ptHaloRadius = pitchPoint_radius * 2.6f;
+            juce::ColourGradient ptGlow (
+                glowBase.withAlpha (0.45f), ringPt.x, ringPt.y,
+                glowBase.withAlpha (0.0f),  ringPt.x + ptHaloRadius, ringPt.y,
+                true);
+            g.setGradientFill (ptGlow);
+            g.fillEllipse (ringPt.x - ptHaloRadius, ringPt.y - ptHaloRadius, ptHaloRadius * 2.0f, ptHaloRadius * 2.0f);
+
+            g.setFont (boldFont);
+            g.setColour (juce::Colours::white);
+            g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
+        }
+        else
+        {
+            // 離鍵後の確定構成音はクリーンな通常ハイライト（発光なし）、非構成音は控えめなグレー
+            g.setFont (regularFont);
+            const juce::Colour textColour = isInChord ? pointColour.withAlpha (0.88f) : inactiveNoteColour;
+            g.setColour (textColour);
+            g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
+        }
     }
 }
 
