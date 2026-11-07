@@ -101,8 +101,138 @@ void HarmonyVisualizerAudioProcessorEditor::drawPastChordLayers (juce::Graphics&
 
 void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::Graphics& g)
 {
-    // Issue #11 にて世代間のボイスリーディング糸（立体直線）を描画予定
-    juce::ignoreUnused (g);
+    const auto& chords = chordHistory.getChords();
+    if (chords.size() <= 1)
+        return;
+
+    const auto& chordState = chordDetector.getCurrentChordState();
+    const float fgAlpha = chordState.isDimmed ? 0.35f : 1.0f;
+
+    // 世代間のボイスリーディング遷移ライン（光の糸）を奥（末尾）から手前（index 0）へ順に描画
+    for (size_t idx = chords.size() - 1; idx >= 1; --idx)
+    {
+        const auto& fromChord = chords[idx];
+        const auto& toChord   = chords[idx - 1];
+
+        if (fromChord.isEmpty() || toChord.isEmpty())
+            continue;
+
+        const float fromZ = fromChord.zPosition;
+        const float toZ   = (idx - 1 == 0) ? 0.0f : toChord.zPosition;
+
+        const float fromAlpha = fromChord.alpha * 0.55f;
+        const float toAlpha   = (idx - 1 == 0) ? fgAlpha : (toChord.alpha * 0.65f);
+
+        const auto connections = VoiceLeadingSolver::solve (fromChord, toChord);
+
+        // 1. 一般声部（PivotNote / Stepwise / Converged / TritoneResolution）を先に描画
+        for (const auto& conn : connections)
+        {
+            if (!conn.isBassLine())
+                drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha);
+        }
+
+        // 2. ベースライン（骨格）をその上に重ねて強調描画
+        for (const auto& conn : connections)
+        {
+            if (conn.isBassLine())
+                drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha);
+        }
+    }
+}
+
+void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
+    juce::Graphics& g,
+    const VoiceLeadingConnection& conn,
+    float fromZ,
+    float toZ,
+    float fromAlpha,
+    float toAlpha)
+{
+    const juce::Point<float> pFrom = projection.projectCircleIndex (conn.fromCircleIndex, fromZ, 1.0f);
+    const juce::Point<float> pTo   = projection.projectCircleIndex (conn.toCircleIndex,   toZ,   1.0f);
+
+    const float midZ = (fromZ + toZ) * 0.5f;
+    const float baseThickness = projection.getProjectedSize (pitchLine_thickness, midZ, 0.35f);
+
+    float thicknessMultiplier = 1.0f;
+    float alphaBoost = 1.0f;
+    juce::Colour startColour = pointColour;
+    juce::Colour endColour   = pointColour;
+
+    switch (conn.type)
+    {
+        case VoiceLeadingConnection::Type::BassLine:
+        {
+            // 最低音同士のベースラインは太めの線＋コーラルレッドで骨格として強調
+            thicknessMultiplier = 2.1f;
+            alphaBoost = 1.15f;
+            startColour = pointColour_root.brighter (0.1f);
+            endColour   = pointColour_root;
+            break;
+        }
+        case VoiceLeadingConnection::Type::PivotNote:
+        {
+            // 共通音の保持は平行に伸びるクリーンな光の軸として描画
+            thicknessMultiplier = 1.15f;
+            alphaBoost = 0.75f;
+            startColour = pointColour;
+            endColour   = juce::Colour (0xff38bdf8).interpolatedWith (pointColour, 0.6f);
+            break;
+        }
+        case VoiceLeadingConnection::Type::TritoneResolution:
+        {
+            // トライトーン解決は緊張色（クリムゾン/オレンジ）から解決色（シアン/ライム）へのグラデーション演出
+            thicknessMultiplier = 1.65f;
+            alphaBoost = 1.1f;
+            startColour = pitchLine_colours[6]; // クリムゾンローズ（緊張）
+            endColour   = pitchLine_colours[1].interpolatedWith (pitchLine_colours[4], 0.4f); // シアン〜ミント（解決）
+            break;
+        }
+        case VoiceLeadingConnection::Type::Stepwise:
+        {
+            // 半音・全音の近接移動は五度圏距離に応じた調和カラーから構成音カラーへ遷移
+            thicknessMultiplier = 1.25f;
+            alphaBoost = 0.9f;
+            const int dist = juce::jlimit (1, 6, conn.circleDistance > 0 ? conn.circleDistance : 1);
+            startColour = pitchLine_colours[static_cast<size_t> (dist)];
+            endColour   = pointColour.interpolatedWith (startColour, 0.5f);
+            break;
+        }
+        case VoiceLeadingConnection::Type::Converged:
+        {
+            // 合流ラインは少し繊細な線幅で解決先へ吸い込まれるように描画
+            thicknessMultiplier = 0.95f;
+            alphaBoost = 0.7f;
+            const int dist = juce::jlimit (1, 6, conn.circleDistance > 0 ? conn.circleDistance : 2);
+            startColour = pitchLine_colours[static_cast<size_t> (dist)];
+            endColour   = pointColour;
+            break;
+        }
+    }
+
+    const float finalFromAlpha = juce::jlimit (0.0f, 1.0f, fromAlpha * alphaBoost);
+    const float finalToAlpha   = juce::jlimit (0.0f, 1.0f, toAlpha   * alphaBoost);
+    const float strokeWidth    = std::max (1.0f, baseThickness * thicknessMultiplier);
+
+    // ベースラインおよびトライトーン解決には柔らかなアウターグロー（光の糸演出）を付与
+    if (conn.isBassLine() || conn.isTritoneResolution())
+    {
+        juce::ColourGradient glowGrad (
+            startColour.withMultipliedAlpha (finalFromAlpha * 0.28f), pFrom.x, pFrom.y,
+            endColour.withMultipliedAlpha (finalToAlpha * 0.38f),     pTo.x,   pTo.y,
+            false);
+        g.setGradientFill (glowGrad);
+        g.drawLine (juce::Line<float> (pFrom, pTo), strokeWidth * 2.6f);
+    }
+
+    // メインの立体遷移ライン（奥から手前へのグラデーション直線）
+    juce::ColourGradient lineGrad (
+        startColour.withMultipliedAlpha (finalFromAlpha), pFrom.x, pFrom.y,
+        endColour.withMultipliedAlpha (finalToAlpha),     pTo.x,   pTo.y,
+        false);
+    g.setGradientFill (lineGrad);
+    g.drawLine (juce::Line<float> (pFrom, pTo), strokeWidth);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Graphics& g)

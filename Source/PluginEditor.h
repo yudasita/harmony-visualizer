@@ -65,6 +65,12 @@ private:
     void drawBackgroundGuides (juce::Graphics& g);
     void drawPastChordLayers (juce::Graphics& g);
     void drawVoiceLeadingConnections (juce::Graphics& g);
+    void drawSingleVoiceLeadingThread (juce::Graphics& g,
+                                       const VoiceLeadingConnection& conn,
+                                       float fromZ,
+                                       float toZ,
+                                       float fromAlpha,
+                                       float toAlpha);
     void drawForegroundChordLayer (juce::Graphics& g);
     void drawChordRingAndPolygon (juce::Graphics& g, const ChordEvent& chord, float effectiveAlpha, bool isForeground);
 
