@@ -87,14 +87,13 @@ void HarmonyVisualizerAudioProcessorEditor::drawPastChordLayers (juce::Graphics&
         return;
 
     // Zソート: 最も奥（末尾）から手前（index 1）へ向かって描画する
-    // 視認性を劇的に高めるため、過去レイヤーのアルファを抑制し、奥に行くほど静かにフェード
     for (size_t idx = chords.size() - 1; idx >= 1; --idx)
     {
         const auto& pastChord = chords[idx];
         if (pastChord.isEmpty())
             continue;
 
-        const float layerAlpha = pastChord.alpha * 0.35f;
+        const float layerAlpha = pastChord.alpha * 0.55f;
         drawChordRingAndPolygon (g, pastChord, layerAlpha, false);
     }
 }
@@ -122,10 +121,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
 
         const bool isLatestTransition = (idx == 1);
 
-        // 過去世代間の糸は薄く繊細に、最新遷移（idx == 1）は鮮やかにフォーカス
-        const float genDamp = isLatestTransition ? 1.0f : 0.45f;
-        const float fromAlpha = fromChord.alpha * 0.55f * genDamp;
-        const float toAlpha   = ((idx - 1 == 0) ? fgAlpha : (toChord.alpha * 0.65f)) * genDamp;
+        // 一般声部は奥へ行くほど繊細に、ベースラインとトライトーン解決は奥でも骨格・緊張の軌跡として存在感を保つ
+        const float normalGenDamp = isLatestTransition ? 1.0f : 0.45f;
+        const float bassOrTensionGenDamp = isLatestTransition ? 1.0f : 0.80f;
 
         const auto connections = VoiceLeadingSolver::solve (fromChord, toChord);
 
@@ -133,14 +131,23 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
         for (const auto& conn : connections)
         {
             if (!conn.isBassLine())
+            {
+                const float damp = conn.isTritoneResolution() ? bassOrTensionGenDamp : normalGenDamp;
+                const float fromAlpha = fromChord.alpha * 0.55f * damp;
+                const float toAlpha   = ((idx - 1 == 0) ? fgAlpha : (toChord.alpha * 0.65f)) * damp;
                 drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
+            }
         }
 
-        // 2. ベースライン（骨格）をその上に重ねて強調描画
+        // 2. ベースライン（骨格）をその上に重ねて描画（奥に行っても他よりしっかり残る減衰率）
         for (const auto& conn : connections)
         {
             if (conn.isBassLine())
+            {
+                const float fromAlpha = fromChord.alpha * 0.65f * bassOrTensionGenDamp;
+                const float toAlpha   = ((idx - 1 == 0) ? fgAlpha : (toChord.alpha * 0.75f)) * bassOrTensionGenDamp;
                 drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
+            }
         }
     }
 }
@@ -158,29 +165,47 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
     const juce::Point<float> pTo   = projection.projectCircleIndex (conn.toCircleIndex,   toZ,   1.0f);
 
     const float midZ = (fromZ + toZ) * 0.5f;
-    const float baseThickness = projection.getProjectedSize (pitchLine_thickness, midZ, 0.35f);
+    // ベースラインは奥に行っても細くなりすぎないよう最小スケールを高めに確保
+    const float minScale = conn.isBassLine() ? 0.50f : 0.35f;
+    const float baseThickness = projection.getProjectedSize (pitchLine_thickness, midZ, minScale);
 
     float thicknessMultiplier = 1.0f;
     float alphaBoost = 1.0f;
     juce::Colour startColour = pointColour;
     juce::Colour endColour   = pointColour;
 
+    // 他の遷移と同じ色体系（同音保持ならシアン系、移動なら五度圏距離に応じた調和カラー）を算出
+    auto resolveMovementColours = [&] (juce::Colour& outStart, juce::Colour& outEnd)
+    {
+        if (conn.circleDistance == 0)
+        {
+            outStart = juce::Colour (0xff7dd3fc);
+            outEnd   = juce::Colour (0xff38bdf8);
+        }
+        else
+        {
+            const int dist = juce::jlimit (1, 6, conn.circleDistance);
+            outStart = pitchLine_colours[static_cast<size_t> (dist)];
+            outEnd   = outStart.brighter (0.2f);
+        }
+    };
+
     switch (conn.type)
     {
         case VoiceLeadingConnection::Type::BassLine:
         {
-            // 最低音同士のベースラインは太めの線＋コーラルレッドで骨格として強調
-            thicknessMultiplier = isLatestTransition ? 2.2f : 1.6f;
-            alphaBoost = 1.25f;
-            startColour = pointColour_root.brighter (0.15f);
-            endColour   = pointColour_root;
+            // ルート音（ベースライン）の遷移色は他の遷移と同じ色体系に揃え、
+            // 手前で色浮きさせず「線の厚み」と「奥での残りやすさ」で進行の骨格を表現する
+            thicknessMultiplier = isLatestTransition ? 1.85f : 1.65f;
+            alphaBoost = isLatestTransition ? 1.05f : 1.25f;
+            resolveMovementColours (startColour, endColour);
             break;
         }
         case VoiceLeadingConnection::Type::PivotNote:
         {
             // 共通音の保持は平行に伸びるクリーンなエレクトリックシアンの光軸
-            thicknessMultiplier = isLatestTransition ? 1.2f : 0.85f;
-            alphaBoost = 0.95f;
+            thicknessMultiplier = isLatestTransition ? 1.15f : 0.85f;
+            alphaBoost = 0.90f;
             startColour = juce::Colour (0xff7dd3fc);
             endColour   = juce::Colour (0xff38bdf8);
             break;
@@ -188,8 +213,8 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
         case VoiceLeadingConnection::Type::TritoneResolution:
         {
             // トライトーン解決は緊張色（クリムゾンローズ）から解決色（ミント/シアン）へのグラデーション
-            thicknessMultiplier = isLatestTransition ? 1.8f : 1.3f;
-            alphaBoost = 1.2f;
+            thicknessMultiplier = isLatestTransition ? 1.75f : 1.40f;
+            alphaBoost = 1.20f;
             startColour = pitchLine_colours[6]; // クリムゾンローズ（緊張）
             endColour   = pitchLine_colours[1].interpolatedWith (pitchLine_colours[4], 0.45f); // シアン〜ミント（解決）
             break;
@@ -197,18 +222,16 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
         case VoiceLeadingConnection::Type::Stepwise:
         {
             // 半音・全音の近接移動は五度圏距離に応じた鮮やかな調和カラー
-            thicknessMultiplier = isLatestTransition ? 1.25f : 0.9f;
-            alphaBoost = 1.05f;
-            const int dist = juce::jlimit (1, 6, conn.circleDistance > 0 ? conn.circleDistance : 1);
-            startColour = pitchLine_colours[static_cast<size_t> (dist)];
-            endColour   = startColour.brighter (0.2f);
+            thicknessMultiplier = isLatestTransition ? 1.20f : 0.85f;
+            alphaBoost = 1.0f;
+            resolveMovementColours (startColour, endColour);
             break;
         }
         case VoiceLeadingConnection::Type::Converged:
         {
             // 合流ラインは少し繊細な線幅で解決先へ吸い込まれるように描画
-            thicknessMultiplier = isLatestTransition ? 1.0f : 0.75f;
-            alphaBoost = 0.85f;
+            thicknessMultiplier = isLatestTransition ? 0.95f : 0.70f;
+            alphaBoost = 0.80f;
             const int dist = juce::jlimit (1, 6, conn.circleDistance > 0 ? conn.circleDistance : 2);
             startColour = pitchLine_colours[static_cast<size_t> (dist)];
             endColour   = pointColour.interpolatedWith (startColour, 0.4f);
@@ -228,8 +251,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
     // =========================================================================
 
     // Layer 1: 最外層グロー（広域オーラ）
-    // 非常に淡く広い光輪を拡散させて背景との間に幻想的な発光レイヤーを形成
-    const float haloWidth = strokeWidth * (conn.isBassLine() ? 4.5f : 3.8f);
+    const float haloWidth = strokeWidth * (conn.isBassLine() ? 4.0f : 3.6f);
     juce::ColourGradient broadGlowGrad (
         startColour.withMultipliedAlpha (finalFromAlpha * 0.14f), pFrom.x, pFrom.y,
         endColour.withMultipliedAlpha   (finalToAlpha   * 0.18f), pTo.x,   pTo.y,
@@ -238,11 +260,10 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
     g.drawLine (line, haloWidth);
 
     // Layer 2: 中間層ブルーム（高彩度インナーグロー）
-    // 鮮やかな原色光をやや太めに重ねて発光の彩度と量感を際立たせる
-    const float bloomWidth = strokeWidth * (conn.isBassLine() ? 2.5f : 2.0f);
+    const float bloomWidth = strokeWidth * (conn.isBassLine() ? 2.2f : 1.9f);
     juce::ColourGradient innerBloomGrad (
-        startColour.withMultipliedAlpha (finalFromAlpha * 0.38f), pFrom.x, pFrom.y,
-        endColour.withMultipliedAlpha   (finalToAlpha   * 0.46f), pTo.x,   pTo.y,
+        startColour.withMultipliedAlpha (finalFromAlpha * 0.36f), pFrom.x, pFrom.y,
+        endColour.withMultipliedAlpha   (finalToAlpha   * 0.44f), pTo.x,   pTo.y,
         false);
     g.setGradientFill (innerBloomGrad);
     g.drawLine (line, bloomWidth);
@@ -256,7 +277,6 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
     g.drawLine (line, strokeWidth);
 
     // Layer 4: 超極細の中心高エネルギーコア（純白に近い光の芯）
-    // 光の中心を通る細く鋭いハイライトを入れることで、本物の発光体（光ファイバー/レーザー）に見せる
     const float coreWidth = std::max (0.8f, strokeWidth * 0.38f);
     const juce::Colour coreStart = juce::Colours::white.interpolatedWith (startColour, 0.25f);
     const juce::Colour coreEnd   = juce::Colours::white.interpolatedWith (endColour,   0.2f);
@@ -268,11 +288,10 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
     g.drawLine (line, coreWidth);
 
     // Layer 5: 端点（音ノードとの接続部）の結合グロー
-    // 糸の終端（手前側）に小さな光の球を添えることで、音と音がエネルギーで結ばれている感を演出
     if (isLatestTransition)
     {
-        const float dotGlowRadius = strokeWidth * 1.6f;
-        g.setColour (endColour.withMultipliedAlpha (finalToAlpha * 0.35f));
+        const float dotGlowRadius = strokeWidth * 1.5f;
+        g.setColour (endColour.withMultipliedAlpha (finalToAlpha * 0.32f));
         g.fillEllipse (pTo.x - dotGlowRadius, pTo.y - dotGlowRadius, dotGlowRadius * 2.0f, dotGlowRadius * 2.0f);
     }
 }
@@ -337,7 +356,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     const float ringThickness = projection.getProjectedSize (circleThickness, z, 0.35f);
 
     // 1. 深度 Z における五度圏リング
-    const float ringAlpha = isForeground ? 1.0f : juce::jlimit (0.05f, 0.45f, effectiveAlpha * 0.5f);
+    const float ringAlpha = isForeground ? 1.0f : juce::jlimit (0.08f, 0.6f, effectiveAlpha * 0.7f);
     g.setColour (circleColour.withMultipliedAlpha (ringAlpha));
     g.drawEllipse (circleCenter.x - projectedRadius,
                    circleCenter.y - projectedRadius,
@@ -369,9 +388,6 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     const float ptDiameter = ptRadius * 2.0f;
 
     // 3. 構成音間のインターバル線と頂点ポイントを透視投影座標で描画
-    // 過去世代はインターバル線をより薄くしてボイスリーディング糸の視認性を邪魔しないようにする
-    const float intervalAlpha = isForeground ? effectiveAlpha : (effectiveAlpha * 0.45f);
-
     for (size_t i = 0; i < chord.circleIndices.size(); ++i)
     {
         const int idxA = chord.circleIndices[i];
@@ -386,7 +402,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
 
             const juce::Point<float> endPoint = projection.projectCircleIndex (idxB, z, 1.0f);
 
-            g.setColour (getIntervalColour (dist, intervalAlpha));
+            g.setColour (getIntervalColour (dist, effectiveAlpha));
             g.drawLine (juce::Line<float> (startPoint, endPoint), lineThickness);
         }
 
