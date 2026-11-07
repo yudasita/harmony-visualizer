@@ -25,8 +25,9 @@ class ChordBoundaryDetector
 public:
     struct ChordState
     {
-        std::vector<int> notes;          // 構成音（MIDIノート番号ソート済み）
-        bool isDimmed { false };         // 演奏待機状態（離鍵＆ペダルOFFで薄く表示）
+        std::vector<int> notes;          // 確定した構成音（MIDIノート番号ソート済み）
+        std::vector<int> soundingNotes;  // 現在実際に発音中の音（押鍵中、またはペダル保持中）
+        bool isDimmed { false };         // 演奏待機状態（全離鍵＆ペダルOFF状態）
         bool isChordCommitted { false }; // 今回の更新で新コードが確定したかのトリガー
     };
 
@@ -103,6 +104,21 @@ public:
 
     const ChordState& getCurrentChordState() const noexcept { return currentState; }
 
+    /** 指定された五度圏インデックス（0〜11）が現在発音中（押鍵中・ペダル保持中）か判定 */
+    bool isCircleIndexSounding (int circleIdx) const noexcept
+    {
+        if (circleIdx < 0 || circleIdx >= 12)
+            return false;
+
+        for (int note : currentState.soundingNotes)
+        {
+            const int pc = ((note % 12) + 12) % 12;
+            if (((pc * 7) % 12) == circleIdx)
+                return true;
+        }
+        return false;
+    }
+
     using NewChordCallback = std::function<void (const std::vector<int>& notes)>;
     void setNewChordCallback (NewChordCallback callback) { onNewChord = std::move (callback); }
 
@@ -110,6 +126,7 @@ public:
     {
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
+        sustainedNotes.clear();
         isCc64Down = false;
         isPitchBendPedalDown = false;
         isPedalDown = false;
@@ -131,9 +148,20 @@ private:
 
     std::set<int> currentlyHeldNotes;
     std::set<int> accumulatedNotes;
+    std::set<int> sustainedNotes;
 
     ChordState currentState;
     NewChordCallback onNewChord;
+
+    void refreshSoundingNotes()
+    {
+        std::set<int> combined = currentlyHeldNotes;
+        if (isPedalDown)
+        {
+            combined.insert (sustainedNotes.begin(), sustainedNotes.end());
+        }
+        currentState.soundingNotes.assign (combined.begin(), combined.end());
+    }
 
     void updatePedalState (double currentTimeMs)
     {
@@ -147,6 +175,8 @@ private:
     void handleNoteOn (int noteNumber, double currentTimeMs)
     {
         currentlyHeldNotes.insert (noteNumber);
+        if (isPedalDown)
+            sustainedNotes.insert (noteNumber);
 
         // 新コード判定の契機:
         // 1. 直前の全離鍵状態（dimmed状態）からの最初の打鍵
@@ -170,6 +200,7 @@ private:
         }
 
         currentState.isDimmed = false;
+        refreshSoundingNotes();
 
         // クオンタイズ窓の開始または継続
         if (!isWindowOpen)
@@ -183,6 +214,7 @@ private:
     {
         juce::ignoreUnused (currentTimeMs);
         currentlyHeldNotes.erase (noteNumber);
+        refreshSoundingNotes();
 
         // 指が1本ずつ離れるミリ秒単位のズレで構成音を削ってしまわないよう、
         // 直前の確定コード（currentState.notes）はそのまま維持する。
@@ -197,10 +229,16 @@ private:
     {
         juce::ignoreUnused (currentTimeMs);
 
-        if (isPedalDown && !down)
+        if (!isPedalDown && down)
+        {
+            // ペダルが踏まれた（ON）：現在押している鍵盤をサスティン対象に追加
+            sustainedNotes = currentlyHeldNotes;
+        }
+        else if (isPedalDown && !down)
         {
             // ペダルが離された（OFF）
             pedalReleasedSinceLastChord = true;
+            sustainedNotes.clear();
 
             // 鍵盤も押されていなければ、直ちにdimmed待機状態へ
             if (currentlyHeldNotes.empty() && !currentState.notes.empty())
@@ -215,6 +253,7 @@ private:
         }
 
         isPedalDown = down;
+        refreshSoundingNotes();
     }
 
     void handleAllNotesOff (double currentTimeMs)
@@ -222,7 +261,9 @@ private:
         juce::ignoreUnused (currentTimeMs);
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
+        sustainedNotes.clear();
         isWindowOpen = false;
+        refreshSoundingNotes();
 
         if (!currentState.notes.empty())
             currentState.isDimmed = true;
