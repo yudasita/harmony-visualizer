@@ -4,7 +4,7 @@
     ChordBoundaryDetector.h
     HarmonyVisualizer - コード境界判定エンジン
 
-    クオンタイズ窓（同時打鍵のズレ吸収）とダンパーペダル（CC64）監視により、
+    クオンタイズ窓（同時打鍵のズレ吸収）とダンパーペダル（CC64 / ピッチベンド代用）監視により、
     コードの切り替え境界を正確に検出する。
 
   ==============================================================================
@@ -18,6 +18,7 @@
 #include <set>
 #include <functional>
 #include <algorithm>
+#include <cmath>
 
 class ChordBoundaryDetector
 {
@@ -57,8 +58,17 @@ public:
         {
             if (event.noteOrController == 64) // CC64: ダンパー/サスティンペダル
             {
-                handlePedalChange (event.value >= 64, currentTimeMs);
+                isCc64Down = (event.value >= 64);
+                updatePedalState (currentTimeMs);
             }
+        }
+        else if (event.type == QueuedMidiEvent::Type::pitchWheel)
+        {
+            // ピッチベンドホイールによるペダル代用（ペダルがない環境向けの動作確認用）
+            // 0..16383（センター8192）。ホイールを傾けている間をペダルON、中央に戻したらOFF
+            const int pitchValue = (static_cast<int> (event.value) << 7) | static_cast<int> (event.noteOrController);
+            isPitchBendPedalDown = (std::abs (pitchValue - 8192) > 2000);
+            updatePedalState (currentTimeMs);
         }
         else if (event.type == QueuedMidiEvent::Type::allNotesOff)
         {
@@ -100,6 +110,8 @@ public:
     {
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
+        isCc64Down = false;
+        isPitchBendPedalDown = false;
         isPedalDown = false;
         pedalReleasedSinceLastChord = false;
         isWindowOpen = false;
@@ -112,6 +124,8 @@ private:
     double windowStartTimeMs { 0.0 };
     bool isWindowOpen { false };
 
+    bool isCc64Down { false };
+    bool isPitchBendPedalDown { false };
     bool isPedalDown { false };
     bool pedalReleasedSinceLastChord { false };
 
@@ -121,6 +135,15 @@ private:
     ChordState currentState;
     NewChordCallback onNewChord;
 
+    void updatePedalState (double currentTimeMs)
+    {
+        const bool effectivePedal = (isCc64Down || isPitchBendPedalDown);
+        if (effectivePedal != isPedalDown)
+        {
+            handlePedalChange (effectivePedal, currentTimeMs);
+        }
+    }
+
     void handleNoteOn (int noteNumber, double currentTimeMs)
     {
         currentlyHeldNotes.insert (noteNumber);
@@ -129,16 +152,23 @@ private:
         // 1. 直前の全離鍵状態（dimmed状態）からの最初の打鍵
         // 2. ペダル踏み直し（ペダルOFF後に新たな打鍵が開始された）
         // 3. 現在クオンタイズ窓が開いておらず、かつ全鍵盤が離された後の打鍵
+        // 4. ペダルOFF時に、前コード確定後に新たな打鍵が発生した場合（一部の音を残したボイスリーディング等）
         const bool wasAllReleased = (currentlyHeldNotes.size() == 1 && !isPedalDown);
-        const bool shouldStartNewChord = currentState.isDimmed || pedalReleasedSinceLastChord || wasAllReleased;
+        const bool isNewNoteAfterWindowClosed = (!isWindowOpen && !isPedalDown && !currentState.notes.empty());
+        const bool shouldStartNewChord = currentState.isDimmed || pedalReleasedSinceLastChord || wasAllReleased || isNewNoteAfterWindowClosed;
 
         if (shouldStartNewChord && !isWindowOpen)
         {
-            accumulatedNotes.clear();
+            // 押し続けている音（currentlyHeldNotes）のみをベースに新コードを蓄積開始
+            // （離鍵された古い音は持ち越さず破棄する）
+            accumulatedNotes = currentlyHeldNotes;
             pedalReleasedSinceLastChord = false;
         }
+        else
+        {
+            accumulatedNotes.insert (noteNumber);
+        }
 
-        accumulatedNotes.insert (noteNumber);
         currentState.isDimmed = false;
 
         // クオンタイズ窓の開始または継続
@@ -154,19 +184,12 @@ private:
         juce::ignoreUnused (currentTimeMs);
         currentlyHeldNotes.erase (noteNumber);
 
-        // ペダルを踏んでいない場合、離鍵された音は現在のコードから除外するか？
-        // クオンタイズ窓が閉じている状態で鍵盤を離した場合は、ペダルがなければ持続しない
-        if (!isPedalDown && !isWindowOpen)
+        // 指が1本ずつ離れるミリ秒単位のズレで構成音を削ってしまわないよう、
+        // 直前の確定コード（currentState.notes）はそのまま維持する。
+        // 全鍵盤が離鍵され、ペダルもOFFになったら直ちに待機状態（dimmed）へ移行する。
+        if (currentlyHeldNotes.empty() && !isPedalDown && !currentState.notes.empty())
         {
-            // ペダルなしで離鍵された場合、現在鳴っている音のみに更新
-            if (!currentlyHeldNotes.empty())
-            {
-                std::vector<int> activeList (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
-                if (activeList != currentState.notes)
-                {
-                    currentState.notes = std::move (activeList);
-                }
-            }
+            currentState.isDimmed = true;
         }
     }
 

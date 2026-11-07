@@ -23,13 +23,14 @@ struct QueuedMidiEvent
         noteOn = 1,
         noteOff = 2,
         controlChange = 3,
-        allNotesOff = 4
+        allNotesOff = 4,
+        pitchWheel = 5
     };
 
     Type type { Type::other };
     uint8_t channel { 1 };
-    uint8_t noteOrController { 0 }; // ノート番号、またはCC番号
-    uint8_t value { 0 };            // ベロシティ、またはCC値
+    uint8_t noteOrController { 0 }; // ノート番号、またはCC番号（pitchWheel時はLSB 7bit）
+    uint8_t value { 0 };            // ベロシティ、またはCC値（pitchWheel時はMSB 7bit）
     int sampleOffset { 0 };         // バッファ内サンプル位置
 };
 
