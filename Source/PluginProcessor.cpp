@@ -182,6 +182,14 @@ void HarmonyVisualizerAudioProcessor::processBlock (juce::AudioBuffer<float>& bu
             event.value = static_cast<uint8_t> (message.getControllerValue());
             pushMidiEvent (event);
         }
+        else if (message.isPitchWheel())
+        {
+            event.type = QueuedMidiEvent::Type::pitchWheel;
+            const int pitchValue = message.getPitchWheelValue(); // 0..16383, センター8192
+            event.noteOrController = static_cast<uint8_t> (pitchValue & 0x7F);        // LSB 7bit
+            event.value = static_cast<uint8_t> ((pitchValue >> 7) & 0x7F);            // MSB 7bit
+            pushMidiEvent (event);
+        }
         else if (message.isAllNotesOff() || message.isAllSoundOff())
         {
             event.type = QueuedMidiEvent::Type::allNotesOff;
