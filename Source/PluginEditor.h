@@ -13,6 +13,7 @@
 #include "ChordBoundaryDetector.h"
 #include "ChordEvent.h"
 #include "ChordHistoryQueue.h"
+#include "PerspectiveProjection.h"
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +35,8 @@ public:
     ChordBoundaryDetector& getChordDetector() noexcept { return chordDetector; }
     ChordHistoryQueue& getChordHistory() noexcept { return chordHistory; }
     const ChordHistoryQueue& getChordHistory() const noexcept { return chordHistory; }
+    PerspectiveProjection& getProjection() noexcept { return projection; }
+    const PerspectiveProjection& getProjection() const noexcept { return projection; }
 
     /**
      * 五度圏上の距離（1〜6）に応じたインターバルカラーを取得
@@ -54,6 +57,14 @@ private:
     
     ChordBoundaryDetector chordDetector;
     ChordHistoryQueue chordHistory { 8, 1.0f };
+    PerspectiveProjection projection;
+
+    // Zソート（ペインターズアルゴリズム）描画用ヘルパー
+    void drawBackgroundGuides (juce::Graphics& g);
+    void drawPastChordLayers (juce::Graphics& g);
+    void drawVoiceLeadingConnections (juce::Graphics& g);
+    void drawForegroundChordLayer (juce::Graphics& g);
+    void drawChordRingAndPolygon (juce::Graphics& g, const ChordEvent& chord, float effectiveAlpha, bool isForeground);
 
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;
