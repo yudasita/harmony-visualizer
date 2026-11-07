@@ -11,6 +11,8 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "ChordBoundaryDetector.h"
+#include "ChordEvent.h"
+#include "ChordHistoryQueue.h"
 #include <unordered_map>
 #include <vector>
 
@@ -30,6 +32,8 @@ public:
     void timerCallback() override;
 
     ChordBoundaryDetector& getChordDetector() noexcept { return chordDetector; }
+    ChordHistoryQueue& getChordHistory() noexcept { return chordHistory; }
+    const ChordHistoryQueue& getChordHistory() const noexcept { return chordHistory; }
 
     /**
      * 五度圏上の距離（1〜6）に応じたインターバルカラーを取得
@@ -49,6 +53,7 @@ private:
     HarmonyVisualizerAudioProcessor& audioProcessor;
     
     ChordBoundaryDetector chordDetector;
+    ChordHistoryQueue chordHistory { 8, 1.0f };
 
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;
