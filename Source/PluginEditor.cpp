@@ -22,6 +22,13 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
         ChordEvent newChord = ChordEvent::fromMidiNotes (notes);
         chordHistory.pushChord (std::move (newChord));
     });
+
+    // 後踏みペダリング（シンコペーション・ペダル）による残響音パージ時の最新コード更新コールバック
+    chordDetector.setUpdateChordCallback ([this] (const std::vector<int>& notes)
+    {
+        chordHistory.updateLatestChord (ChordEvent::fromMidiNotes (notes));
+    });
+
     startTimerHz (60);
     setResizable (true, true);
     setResizeLimits (300, 300, 1000, 1000);
