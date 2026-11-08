@@ -10,6 +10,7 @@
 
 #include <JuceHeader.h>
 #include <array>
+#include <atomic>
 
 //==============================================================================
 /**
@@ -79,6 +80,27 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==============================================================================
+    // 設定パネル（ValueTree状態管理）API
+    static constexpr int defaultMaxHistorySize = 8;
+    static constexpr double defaultQuantizeWindowMs = 60.0;
+    static constexpr double defaultArpeggioThresholdMs = 450.0;
+
+    int getMaxHistorySize() const noexcept;
+    void setMaxHistorySize (int size);
+
+    double getQuantizeWindowMs() const noexcept;
+    void setQuantizeWindowMs (double ms);
+
+    double getArpeggioThresholdMs() const noexcept;
+    void setArpeggioThresholdMs (double ms);
+
+    void resetSettingsToDefaults();
+
+    juce::ValueTree& getSettingsState() noexcept { return settingsState; }
+    const juce::ValueTree& getSettingsState() const noexcept { return settingsState; }
+    uint32_t getSettingsRevision() const noexcept { return settingsRevision.load (std::memory_order_relaxed); }
+
+    //==============================================================================
     /** UIスレッドなどの単一コンシューマスレッドから未読のMIDIイベントを取り出す */
     template <typename Handler>
     void popMidiEvents (Handler&& handler)
@@ -104,6 +126,9 @@ private:
     static constexpr int midiFifoCapacity = 2048;
     std::array<QueuedMidiEvent, midiFifoCapacity> midiFifoBuffer {};
     juce::AbstractFifo midiFifo { midiFifoCapacity };
+
+    juce::ValueTree settingsState { "HarmonyVisualizerSettings" };
+    std::atomic<uint32_t> settingsRevision { 1 };
 
     void pushMidiEvent (const QueuedMidiEvent& event) noexcept;
 

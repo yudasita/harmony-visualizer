@@ -29,6 +29,67 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
         chordHistory.updateLatestChord (ChordEvent::fromMidiNotes (notes));
     });
 
+    auto configureSlider = [this] (juce::Slider& slider,
+                                   double minVal,
+                                   double maxVal,
+                                   double stepVal,
+                                   const juce::String& suffix)
+    {
+        slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        slider.setRange (minVal, maxVal, stepVal);
+        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 68, 22);
+        slider.setTextValueSuffix (suffix);
+        slider.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff232a3b));
+        slider.setColour (juce::Slider::trackColourId, juce::Colour (0xff38bdf8));
+        slider.setColour (juce::Slider::thumbColourId, juce::Colour (0xfff1f5f9));
+        slider.setColour (juce::Slider::textBoxTextColourId, juce::Colour (0xffe2e8f0));
+        slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colour (0xff141824));
+        slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff2e374d));
+        slider.setVisible (false);
+        addAndMakeVisible (slider);
+        slider.setVisible (false);
+    };
+
+    configureSlider (historySizeSlider, 2.0, 16.0, 1.0, juce::String::fromUTF8 (" 世代"));
+    historySizeSlider.onValueChange = [this]()
+    {
+        const int newSize = static_cast<int> (std::round (historySizeSlider.getValue()));
+        audioProcessor.setMaxHistorySize (newSize);
+        chordHistory.setMaxHistorySize (static_cast<size_t> (newSize));
+        lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
+    };
+
+    configureSlider (quantizeWindowSlider, 15.0, 200.0, 5.0, " ms");
+    quantizeWindowSlider.onValueChange = [this]()
+    {
+        const double newMs = quantizeWindowSlider.getValue();
+        audioProcessor.setQuantizeWindowMs (newMs);
+        chordDetector.setQuantizeWindowMs (newMs);
+        lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
+    };
+
+    configureSlider (arpeggioThresholdSlider, 100.0, 1200.0, 25.0, " ms");
+    arpeggioThresholdSlider.onValueChange = [this]()
+    {
+        const double newMs = arpeggioThresholdSlider.getValue();
+        audioProcessor.setArpeggioThresholdMs (newMs);
+        chordDetector.setArpeggioThresholdMs (newMs);
+        lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
+    };
+
+    resetSettingsButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff242c3d));
+    resetSettingsButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff334155));
+    resetSettingsButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffcbd5e1));
+    resetSettingsButton.onClick = [this]()
+    {
+        audioProcessor.resetSettingsToDefaults();
+        syncSettingsFromProcessor();
+    };
+    addAndMakeVisible (resetSettingsButton);
+    resetSettingsButton.setVisible (false);
+
+    syncSettingsFromProcessor();
+
     startTimerHz (60);
     setResizable (true, false);
     setResizeLimits (300, 300, 1000, 1000);
@@ -44,6 +105,11 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 {
     const double currentTimeMs = juce::Time::getMillisecondCounterHiRes();
 
+    if (audioProcessor.getSettingsRevision() != lastSyncedSettingsRevision)
+    {
+        syncSettingsFromProcessor();
+    }
+
     // ロックフリーFIFOから未読イベントを取り出してコード境界判定エンジンへ渡す
     audioProcessor.popMidiEvents ([this, currentTimeMs] (const QueuedMidiEvent& event)
     {
@@ -54,6 +120,19 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
 
     // コード履歴キューのアニメーション更新
     chordHistory.updateAnimation (0.2f);
+
+    // 設定モーダルの表示・非表示アニメーション更新
+    const float targetModalAlpha = isSettingsModalOpen ? 1.0f : 0.0f;
+    if (std::abs (settingsModalAlpha - targetModalAlpha) > 0.004f)
+    {
+        settingsModalAlpha += (targetModalAlpha - settingsModalAlpha) * 0.26f;
+        updateSettingsModalLayout();
+    }
+    else if (settingsModalAlpha != targetModalAlpha)
+    {
+        settingsModalAlpha = targetModalAlpha;
+        updateSettingsModalLayout();
+    }
 
     repaint();
 }
@@ -80,14 +159,19 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.35f));
     const juce::String debugBuildText = "Debug Build: " + juce::String (__DATE__) + " " + juce::String (__TIME__);
     g.drawText (debugBuildText, getLocalBounds().removeFromBottom (16).reduced (8, 0), juce::Justification::bottomRight, false);
-#else
-    // リリースビルド用バージョン表示バッジ（控えめに表示）
-    // TODO: Issue #32（設定パネルUI基盤）実装時に、このバージョン表示は設定画面内の情報項目（About）へ移設する
-    g.setFont (juce::FontOptions (10.0f));
-    g.setColour (juce::Colours::white.withAlpha (0.35f));
-    const juce::String releaseVersionText = "v" + juce::String (ProjectInfo::versionString);
-    g.drawText (releaseVersionText, getLocalBounds().removeFromBottom (16).reduced (8, 0), juce::Justification::bottomRight, false);
 #endif
+
+    // 右上の設定アイコン（歯車ボタン）と設定モーダルオーバーレイの描画
+    drawSettingsGearButton (g);
+    if (settingsModalAlpha > 0.005f)
+    {
+        drawSettingsModalOverlay (g);
+    }
+}
+
+void HarmonyVisualizerAudioProcessorEditor::paintOverChildren (juce::Graphics& g)
+{
+    juce::ignoreUnused (g);
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawBackgroundGuides (juce::Graphics& g)
@@ -596,4 +680,285 @@ void HarmonyVisualizerAudioProcessorEditor::resized()
     
     pitchPoint_radius = 0.02f * circleRadius;
     pitchPoint_diameter = 2.0f * pitchPoint_radius;
+
+    // 右上の歯車アイコンボタン領域
+    constexpr float gearBtnSize = 28.0f;
+    constexpr float gearMargin = 10.0f;
+    gearButtonBounds = juce::Rectangle<float> (static_cast<float> (getWidth()) - gearBtnSize - gearMargin,
+                                               gearMargin,
+                                               gearBtnSize,
+                                               gearBtnSize);
+
+    updateSettingsModalLayout();
+}
+
+void HarmonyVisualizerAudioProcessorEditor::syncSettingsFromProcessor()
+{
+    const int historySize = audioProcessor.getMaxHistorySize();
+    const double quantizeMs = audioProcessor.getQuantizeWindowMs();
+    const double arpeggioMs = audioProcessor.getArpeggioThresholdMs();
+
+    chordHistory.setMaxHistorySize (static_cast<size_t> (historySize));
+    chordDetector.setQuantizeWindowMs (quantizeMs);
+    chordDetector.setArpeggioThresholdMs (arpeggioMs);
+
+    historySizeSlider.setValue (static_cast<double> (historySize), juce::dontSendNotification);
+    quantizeWindowSlider.setValue (quantizeMs, juce::dontSendNotification);
+    arpeggioThresholdSlider.setValue (arpeggioMs, juce::dontSendNotification);
+
+    lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
+}
+
+void HarmonyVisualizerAudioProcessorEditor::setSettingsModalOpen (bool shouldOpen)
+{
+    if (isSettingsModalOpen == shouldOpen)
+        return;
+
+    isSettingsModalOpen = shouldOpen;
+    if (isSettingsModalOpen)
+        syncSettingsFromProcessor();
+
+    updateSettingsModalLayout();
+    repaint();
+}
+
+void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
+{
+    const float w = static_cast<float> (getWidth());
+    const float h = static_cast<float> (getHeight());
+
+    const float cardW = juce::jlimit (260.0f, 360.0f, w * 0.84f);
+    const float cardH = juce::jlimit (255.0f, 310.0f, h * 0.78f);
+
+    // 開閉アニメーション時の微小なスライドイン効果
+    const float slideOffsetY = (1.0f - settingsModalAlpha) * -10.0f;
+    modalCardBounds = juce::Rectangle<float> ((w - cardW) * 0.5f,
+                                              (h - cardH) * 0.5f + slideOffsetY,
+                                              cardW,
+                                              cardH);
+
+    modalCloseButtonBounds = juce::Rectangle<float> (modalCardBounds.getRight() - 32.0f,
+                                                     modalCardBounds.getY() + 8.0f,
+                                                     24.0f,
+                                                     24.0f);
+
+    const bool showControls = (settingsModalAlpha > 0.05f);
+    historySizeSlider.setVisible (showControls);
+    quantizeWindowSlider.setVisible (showControls);
+    arpeggioThresholdSlider.setVisible (showControls);
+    resetSettingsButton.setVisible (showControls);
+
+    historySizeSlider.setInterceptsMouseClicks ( isSettingsModalOpen, isSettingsModalOpen);
+    quantizeWindowSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    arpeggioThresholdSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    resetSettingsButton.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+
+    if (showControls)
+    {
+        historySizeSlider.setAlpha (settingsModalAlpha);
+        quantizeWindowSlider.setAlpha (settingsModalAlpha);
+        arpeggioThresholdSlider.setAlpha (settingsModalAlpha);
+        resetSettingsButton.setAlpha (settingsModalAlpha);
+
+        const int contentX = static_cast<int> (modalCardBounds.getX() + 16.0f);
+        const int contentW = static_cast<int> (modalCardBounds.getWidth() - 32.0f);
+        const int baseTop = static_cast<int> (modalCardBounds.getY() + 48.0f);
+        const int rowStep = 48;
+
+        historySizeSlider.setBounds (contentX, baseTop + 18, contentW, 24);
+        quantizeWindowSlider.setBounds (contentX, baseTop + rowStep + 18, contentW, 24);
+        arpeggioThresholdSlider.setBounds (contentX, baseTop + rowStep * 2 + 18, contentW, 24);
+
+        const int resetBtnW = 116;
+        const int resetBtnH = 24;
+        const int footerY = static_cast<int> (modalCardBounds.getBottom() - 34.0f);
+        resetSettingsButton.setBounds (static_cast<int> (modalCardBounds.getRight() - 16.0f) - resetBtnW,
+                                       footerY,
+                                       resetBtnW,
+                                       resetBtnH);
+    }
+}
+
+void HarmonyVisualizerAudioProcessorEditor::drawSettingsGearButton (juce::Graphics& g)
+{
+    const float bgAlpha = isSettingsModalOpen ? 0.28f : (isGearButtonHovered ? 0.18f : 0.08f);
+    g.setColour (juce::Colours::white.withAlpha (bgAlpha));
+    g.fillRoundedRectangle (gearButtonBounds, 6.0f);
+
+    if (isSettingsModalOpen || isGearButtonHovered)
+    {
+        g.setColour (juce::Colour (0xff38bdf8).withAlpha (isSettingsModalOpen ? 0.65f : 0.35f));
+        g.drawRoundedRectangle (gearButtonBounds, 6.0f, 1.0f);
+    }
+
+    const juce::Point<float> c = gearButtonBounds.getCentre();
+    const float outerR = gearButtonBounds.getWidth() * 0.30f;
+    const float innerR = outerR * 0.72f;
+    const float holeR  = outerR * 0.36f;
+    constexpr int numTeeth = 8;
+
+    juce::Path gearPath;
+    const int totalSteps = numTeeth * 4;
+    for (int i = 0; i < totalSteps; ++i)
+    {
+        const float angle = static_cast<float> (i) * juce::MathConstants<float>::twoPi / static_cast<float> (totalSteps);
+        const bool isOuter = ((i % 4) == 0 || (i % 4) == 1);
+        const float r = isOuter ? outerR : innerR;
+        const float px = c.x + std::cos (angle) * r;
+        const float py = c.y + std::sin (angle) * r;
+        if (i == 0)
+            gearPath.startNewSubPath (px, py);
+        else
+            gearPath.lineTo (px, py);
+    }
+    gearPath.closeSubPath();
+    gearPath.addCentredArc (c.x, c.y, holeR, holeR, 0.0f, 0.0f, juce::MathConstants<float>::twoPi, true);
+    gearPath.closeSubPath();
+    gearPath.setUsingNonZeroWinding (false);
+
+    const juce::Colour iconColour = isSettingsModalOpen
+        ? juce::Colour (0xff38bdf8)
+        : (isGearButtonHovered ? juce::Colour (0xfff1f5f9) : inactiveNoteColour.brighter (0.25f));
+    g.setColour (iconColour);
+    g.fillPath (gearPath);
+}
+
+void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Graphics& g)
+{
+    const float a = juce::jlimit (0.0f, 1.0f, settingsModalAlpha);
+
+    // 1. 半透明バックドロップ（背景の五度圏トンネルを暗転）
+    g.setColour (juce::Colour (0xff090b10).withAlpha (0.72f * a));
+    g.fillRect (getLocalBounds());
+
+    // 2. モーダルカード本体（Dark Slate サーフェス）
+    g.setColour (juce::Colour (0xff181d2a).withAlpha (0.96f * a));
+    g.fillRoundedRectangle (modalCardBounds, 12.0f);
+
+    g.setColour (juce::Colour (0xff334155).withAlpha (0.85f * a));
+    g.drawRoundedRectangle (modalCardBounds, 12.0f, 1.2f);
+
+    // 3. ヘッダータイトルと閉じるボタン（×）
+    const juce::Rectangle<float> headerArea (modalCardBounds.getX() + 16.0f,
+                                             modalCardBounds.getY() + 8.0f,
+                                             modalCardBounds.getWidth() - 52.0f,
+                                             26.0f);
+    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    g.setColour (juce::Colour (0xfff1f5f9).withAlpha (a));
+    g.drawText (juce::String::fromUTF8 ("設定 (Settings)"), headerArea, juce::Justification::centredLeft, false);
+
+    // ヘッダー区切り線
+    const float headerLineY = modalCardBounds.getY() + 38.0f;
+    g.setColour (juce::Colour (0xff2a3245).withAlpha (a));
+    g.drawHorizontalLine (static_cast<int> (headerLineY),
+                          modalCardBounds.getX() + 12.0f,
+                          modalCardBounds.getRight() - 12.0f);
+
+    // 閉じる（×）ボタン
+    if (isCloseButtonHovered)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.12f * a));
+        g.fillRoundedRectangle (modalCloseButtonBounds, 5.0f);
+    }
+    g.setColour ((isCloseButtonHovered ? juce::Colour (0xfff8fafc) : juce::Colour (0xff94a3b8)).withAlpha (a));
+    const juce::Point<float> closeCenter = modalCloseButtonBounds.getCentre();
+    const float crossHalf = 4.5f;
+    g.drawLine (closeCenter.x - crossHalf, closeCenter.y - crossHalf,
+                closeCenter.x + crossHalf, closeCenter.y + crossHalf, 1.6f);
+    g.drawLine (closeCenter.x + crossHalf, closeCenter.y - crossHalf,
+                closeCenter.x - crossHalf, closeCenter.y + crossHalf, 1.6f);
+
+    // 4. 各スライダー項目のラベル
+    const float contentX = modalCardBounds.getX() + 16.0f;
+    const float contentW = modalCardBounds.getWidth() - 32.0f;
+    const float baseTop = modalCardBounds.getY() + 46.0f;
+    const float rowStep = 48.0f;
+
+    g.setFont (juce::FontOptions (12.0f));
+    g.setColour (juce::Colour (0xffcbd5e1).withAlpha (a));
+    g.drawText (juce::String::fromUTF8 ("履歴表示世代数 (History Generations)"),
+                juce::Rectangle<float> (contentX, baseTop, contentW, 18.0f),
+                juce::Justification::centredLeft, false);
+
+    g.drawText (juce::String::fromUTF8 ("同時打鍵判定窓 (Quantize Window)"),
+                juce::Rectangle<float> (contentX, baseTop + rowStep, contentW, 18.0f),
+                juce::Justification::centredLeft, false);
+
+    g.drawText (juce::String::fromUTF8 ("アルペジオ許容時間 (Arpeggio Window)"),
+                juce::Rectangle<float> (contentX, baseTop + rowStep * 2.0f, contentW, 18.0f),
+                juce::Justification::centredLeft, false);
+
+    // 5. フッター区切り線 ＆ About（バージョン・ビルド情報）表示
+    const float footerLineY = modalCardBounds.getBottom() - 42.0f;
+    g.setColour (juce::Colour (0xff2a3245).withAlpha (a));
+    g.drawHorizontalLine (static_cast<int> (footerLineY),
+                          modalCardBounds.getX() + 12.0f,
+                          modalCardBounds.getRight() - 12.0f);
+
+    const juce::Rectangle<float> aboutBounds (contentX,
+                                              modalCardBounds.getBottom() - 36.0f,
+                                              contentW - 124.0f,
+                                              28.0f);
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    g.setColour (juce::Colour (0xff94a3b8).withAlpha (a));
+    const juce::String versionTitle = "HarmonyVisualizer v" + juce::String (ProjectInfo::versionString);
+    g.drawText (versionTitle, aboutBounds.withHeight (14.0f), juce::Justification::centredLeft, false);
+
+    g.setFont (juce::FontOptions (9.5f));
+    g.setColour (juce::Colour (0xff64748b).withAlpha (a));
+#if JUCE_DEBUG || defined(_DEBUG) || defined(DEBUG)
+    const juce::String buildInfo = "Debug Build (" + juce::String (__DATE__) + ")";
+#else
+    const juce::String buildInfo = "Release Build (" + juce::String (__DATE__) + ")";
+#endif
+    g.drawText (buildInfo, aboutBounds.withTrimmedTop (14.0f), juce::Justification::centredLeft, false);
+}
+
+void HarmonyVisualizerAudioProcessorEditor::mouseDown (const juce::MouseEvent& event)
+{
+    const juce::Point<float> pos = event.position;
+
+    if (gearButtonBounds.contains (pos))
+    {
+        setSettingsModalOpen (!isSettingsModalOpen);
+        return;
+    }
+
+    if (isSettingsModalOpen)
+    {
+        if (modalCloseButtonBounds.contains (pos) || !modalCardBounds.contains (pos))
+        {
+            setSettingsModalOpen (false);
+            return;
+        }
+    }
+}
+
+void HarmonyVisualizerAudioProcessorEditor::mouseMove (const juce::MouseEvent& event)
+{
+    const juce::Point<float> pos = event.position;
+    const bool newGearHover = gearButtonBounds.contains (pos);
+    const bool newCloseHover = isSettingsModalOpen && modalCloseButtonBounds.contains (pos);
+
+    if (newGearHover != isGearButtonHovered || newCloseHover != isCloseButtonHovered)
+    {
+        isGearButtonHovered = newGearHover;
+        isCloseButtonHovered = newCloseHover;
+        setMouseCursor ((isGearButtonHovered || isCloseButtonHovered)
+                            ? juce::MouseCursor::PointingHandCursor
+                            : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void HarmonyVisualizerAudioProcessorEditor::mouseExit (const juce::MouseEvent& event)
+{
+    juce::ignoreUnused (event);
+    if (isGearButtonHovered || isCloseButtonHovered)
+    {
+        isGearButtonHovered = false;
+        isCloseButtonHovered = false;
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        repaint();
+    }
 }
