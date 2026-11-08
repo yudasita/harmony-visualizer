@@ -47,6 +47,13 @@ harmony-visualizer/               # リポジトリルート
 
 macOS 環境で Xcode コマンドラインツール（`xcodebuild`）を使用してビルドと動作確認を行う。
 
+### 3.0 ビルド運用の原則（Debug ビルド限定ルール）
+
+- **通常開発時は Debug 構成のみをビルドする**:
+  - 機能追加、バグ修正、リファクタリング、動作確認などの通常開発サイクルでは、常に `-configuration Debug` を指定してビルドを行う。
+  - Release ビルド（`-configuration Release`）はビルド時間が長く、Debug ビルド識別バッジ等も無効化されるため、公式配布物（ZIP/インストーラ）の作成やリリース時以外は原則としてビルドしない。
+  - 動作確認時も、常に `HarmonyVisualizer(Debug).app` または Debug 版 VST3 プラグインを使用する。
+
 ### 3.1 スタンドアロンアプリのビルド
 
 ```sh
@@ -148,4 +155,5 @@ xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
   - ファイル・ディレクトリの削除
   - リポジトリの公開範囲変更
 - **作業前の状態確認**: 作業開始時に `git status` を確認し、未コミットの変更がある場合は扱いをユーザーに確認する。
+- **通常開発時のビルド構成**: 検証や動作確認で `xcodebuild` やビルドコマンドを実行する際は、リリース時以外は必ず **Debug 構成（`-configuration Debug`）のみ** をビルドする。不要な Release ビルドを行わない。
 - **一時ファイルのクリーンアップ**: PR 作成前や作業完了時に、不要なビルド一時ファイルやログが残っていないか確認し整理する。
