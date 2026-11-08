@@ -546,7 +546,7 @@ private:
         const int singleNewNote = (numNewNotes == 1) ? notesInCurrentWindow.front() : -1;
 
         int melodyCandidateNote = singleNewNote;
-        if (numNewNotes > 1 && hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3)
+        if (isPedalDown && numNewNotes > 1 && hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3)
         {
             std::vector<int> sortedWindowNotes = notesInCurrentWindow;
             std::sort (sortedWindowNotes.begin(), sortedWindowNotes.end());
@@ -752,9 +752,10 @@ private:
         }
 
         // 既存のアクティブな伴奏コードの継続（同一コード上でのメロディ展開や音数の微増減）の判定:
+        // ※ペダル踏下中のみ有効（ペダルを踏んでいない演奏では、打鍵ごとの響きの変化を別コードとして扱う）
         // ※アルペジオ成長（!isNewChordStrike && isSubsetGrowth）は onUpdateChord で最前面を更新するため除外
         bool isSameChordContinuation = false;
-        if (hasActiveCommittedChord && currentState.notes.size() >= 3 && newNotes.size() >= 2
+        if (isPedalDown && hasActiveCommittedChord && currentState.notes.size() >= 3 && newNotes.size() >= 2
             && !(isSubsetGrowth && !isNewChordStrike))
         {
             const int currBass = currentState.notes.front();
