@@ -87,7 +87,7 @@ public:
             if (currentTimeMs >= windowStartTimeMs + quantizeWindowMs)
             {
                 // クオンタイズ窓が満了
-                commitAccumulatedNotes();
+                commitAccumulatedNotes (currentTimeMs);
                 isWindowOpen = false;
             }
         }
@@ -120,7 +120,10 @@ public:
     }
 
     using NewChordCallback = std::function<void (const std::vector<int>& notes)>;
+    using UpdateChordCallback = std::function<void (const std::vector<int>& notes)>;
+
     void setNewChordCallback (NewChordCallback callback) { onNewChord = std::move (callback); }
+    void setUpdateChordCallback (UpdateChordCallback callback) { onUpdateChord = std::move (callback); }
 
     void reset()
     {
@@ -133,6 +136,7 @@ public:
         pedalReleasedSinceLastChord = false;
         isWindowOpen = false;
         windowStartTimeMs = 0.0;
+        lastCommitTimeMs = -9999.0;
         currentState = ChordState();
     }
 
@@ -152,6 +156,10 @@ private:
 
     ChordState currentState;
     NewChordCallback onNewChord;
+    UpdateChordCallback onUpdateChord;
+
+    double lastCommitTimeMs { -9999.0 };
+    double syncopationThresholdMs { 400.0 }; // 後踏みペダル（シンコペーション・ペダル）許容時間窓(ms)
 
     void refreshSoundingNotes()
     {
@@ -249,6 +257,32 @@ private:
             {
                 // 鍵盤が押されている音だけを残す
                 accumulatedNotes = currentlyHeldNotes;
+
+                // 後踏みペダリング（シンコペーション・ペダル）対策：
+                // ペダルがOFF（踏み直しのリリース）になった際、
+                // ペダルのサスティン残響音によって混ざっていた過去コード音をパージする。
+                if (!currentlyHeldNotes.empty())
+                {
+                    std::vector<int> heldNotesVec (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
+
+                    if (isWindowOpen)
+                    {
+                        // クオンタイズ窓の最中であれば、蓄積バッファから古いサスティン音を即座に排除
+                        accumulatedNotes = currentlyHeldNotes;
+                    }
+                    else if ((currentTimeMs - lastCommitTimeMs) <= syncopationThresholdMs && currentState.notes != heldNotesVec)
+                    {
+                        // 直前にペダル残響を巻き込んでコミットしてしまった場合：
+                        // 現在実際に指で押さえている新コード構成音のみに再確定・更新する
+                        currentState.notes = heldNotesVec;
+                        currentState.isChordCommitted = true;
+
+                        if (onUpdateChord)
+                        {
+                            onUpdateChord (currentState.notes);
+                        }
+                    }
+                }
             }
         }
 
@@ -269,7 +303,7 @@ private:
             currentState.isDimmed = true;
     }
 
-    void commitAccumulatedNotes()
+    void commitAccumulatedNotes (double currentTimeMs)
     {
         if (accumulatedNotes.empty())
             return;
@@ -281,6 +315,7 @@ private:
         currentState.notes = newNotes;
         currentState.isDimmed = false;
         currentState.isChordCommitted = true;
+        lastCommitTimeMs = currentTimeMs;
 
         if (isDifferentChord && onNewChord)
         {
