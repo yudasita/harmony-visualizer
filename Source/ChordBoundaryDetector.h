@@ -461,6 +461,33 @@ private:
             // ペダルが踏まれた（ON）：現在押している鍵盤をサスティン対象に追加
             sustainedNotes = currentlyHeldNotes;
             isInitialArpeggioForPedalAllowed = true;
+
+            // ペダル踏み込み時：鍵盤上で新しい和音が押さえられていれば、それを新コードとして確定・送出
+            if (!currentlyHeldNotes.empty())
+            {
+                std::vector<int> heldNotesVec (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
+                std::set<int> heldPitchClasses;
+                for (int n : heldNotesVec)
+                    heldPitchClasses.insert (((n % 12) + 12) % 12);
+
+                if (heldPitchClasses.size() >= static_cast<size_t> (minNotesForChord))
+                {
+                    if (heldNotesVec != currentState.notes)
+                    {
+                        currentState.notes = heldNotesVec;
+                        currentState.isChordCommitted = true;
+                        currentState.isDimmed = false;
+                        hasActiveCommittedChord = true;
+                        isBuildingInitialChord = false;
+                        isInitialArpeggioForPedalAllowed = false;
+                        lastCommitTimeMs = currentTimeMs;
+                        accumulatedNotes = currentlyHeldNotes;
+
+                        if (onNewChord)
+                            onNewChord (currentState.notes);
+                    }
+                }
+            }
         }
         else if (isPedalDown && !down)
         {
@@ -473,44 +500,43 @@ private:
             if (currentlyHeldNotes.empty() && !currentState.notes.empty())
             {
                 currentState.isDimmed = true;
+                hasActiveCommittedChord = false;
             }
-            else
+            else if (!currentlyHeldNotes.empty())
             {
                 // 鍵盤が押されている音だけを残す
                 accumulatedNotes = currentlyHeldNotes;
 
-                // 後踏みペダリング（シンコペーション・ペダル）対策：
-                // ペダルがOFF（踏み直しのリリース）になった際、
-                // ペダルのサスティン残響音によって混ざっていた過去コード音をパージする。
-                if (!currentlyHeldNotes.empty())
+                std::vector<int> heldNotesVec (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
+
+                // 最低音数（2音以上）を満たしている場合
+                std::set<int> heldPitchClasses;
+                for (int n : heldNotesVec)
+                    heldPitchClasses.insert (((n % 12) + 12) % 12);
+
+                if (heldPitchClasses.size() >= static_cast<size_t> (minNotesForChord))
                 {
-                    std::vector<int> heldNotesVec (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
-
-                    // 最低音数（2音以上）を満たしている場合のみ更新
-                    std::set<int> heldPitchClasses;
-                    for (int n : heldNotesVec)
-                        heldPitchClasses.insert (((n % 12) + 12) % 12);
-
-                    const bool meetsMinNotes = (heldPitchClasses.size() >= static_cast<size_t> (minNotesForChord));
-
-                    if (isWindowOpen)
+                    // 後踏みペダル等で次のコードを押さえた状態でペダルをOFFにした場合：
+                    // 直前のコードと異なっていれば、これを次のコードとして確定し奥へ送出
+                    if (heldNotesVec != currentState.notes)
                     {
-                        // クオンタイズ窓の最中であれば、蓄積バッファから古いサスティン音を即座に排除
-                        accumulatedNotes = currentlyHeldNotes;
-                    }
-                    else if (meetsMinNotes && (currentTimeMs - lastCommitTimeMs) <= syncopationThresholdMs && currentState.notes != heldNotesVec)
-                    {
-                        // 直前にペダル残響を巻き込んでコミットしてしまった場合：
-                        // 現在実際に指で押さえている新コード構成音のみに再確定・更新する
                         currentState.notes = heldNotesVec;
                         currentState.isChordCommitted = true;
+                        currentState.isDimmed = false;
                         hasActiveCommittedChord = true;
+                        isBuildingInitialChord = false;
+                        isInitialArpeggioForPedalAllowed = false;
+                        lastCommitTimeMs = currentTimeMs;
 
-                        if (onUpdateChord)
-                        {
-                            onUpdateChord (currentState.notes);
-                        }
+                        if (onNewChord)
+                            onNewChord (currentState.notes);
                     }
+                }
+                else
+                {
+                    // 鍵盤を押しているがコード最低音数に満たない場合（アルペジオ開始など）
+                    hasActiveCommittedChord = false;
+                    isBuildingInitialChord = true;
                 }
             }
         }
@@ -544,43 +570,7 @@ private:
 
         const int numNewNotes = static_cast<int> (notesInCurrentWindow.size());
         const int singleNewNote = (numNewNotes == 1) ? notesInCurrentWindow.front() : -1;
-
         int melodyCandidateNote = singleNewNote;
-        if (isPedalDown && numNewNotes > 1 && hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3)
-        {
-            std::vector<int> sortedWindowNotes = notesInCurrentWindow;
-            std::sort (sortedWindowNotes.begin(), sortedWindowNotes.end());
-
-            const int potentialTopNote = sortedWindowNotes.back();
-            const int potentialBassNote = sortedWindowNotes.front();
-            const int currentBass = currentState.notes.front();
-
-            const bool sameBassPc = (((potentialBassNote % 12) + 12) % 12) == (((currentBass % 12) + 12) % 12);
-            const bool bassNotLower = (potentialBassNote >= currentBass);
-
-            if (sameBassPc && bassNotLower)
-            {
-                bool lowerNotesMatchAccompaniment = true;
-                std::set<int> currentPcs;
-                for (int n : currentState.notes)
-                    currentPcs.insert (((n % 12) + 12) % 12);
-
-                for (size_t i = 0; i + 1 < sortedWindowNotes.size(); ++i)
-                {
-                    const int pc = ((sortedWindowNotes[i] % 12) + 12) % 12;
-                    if (currentPcs.find (pc) == currentPcs.end())
-                    {
-                        lowerNotesMatchAccompaniment = false;
-                        break;
-                    }
-                }
-
-                if (lowerNotesMatchAccompaniment && potentialTopNote > potentialBassNote)
-                {
-                    melodyCandidateNote = potentialTopNote;
-                }
-            }
-        }
 
         // 最低音数フィルタ: ピッチクラス数が minNotesForChord 未満の場合はコードとして確定しない
         // （単音演奏時は外周リングの soundingNotes のみ点灯させ、コード履歴キューへは送らない）
@@ -751,53 +741,13 @@ private:
             }
         }
 
-        // 既存のアクティブな伴奏コードの継続（同一コード上でのメロディ展開や音数の微増減）の判定:
-        // ※ペダル踏下中のみ有効（ペダルを踏んでいない演奏では、打鍵ごとの響きの変化を別コードとして扱う）
-        // ※アルペジオ成長（!isNewChordStrike && isSubsetGrowth）は onUpdateChord で最前面を更新するため除外
-        bool isSameChordContinuation = false;
-        if (isPedalDown && hasActiveCommittedChord && currentState.notes.size() >= 3 && newNotes.size() >= 2
-            && !(isSubsetGrowth && !isNewChordStrike))
+        // ペダル保持中のコード変化防止:
+        // ペダルが踏まれており、既にコードが確定している場合、
+        // ペダル保持中に打鍵されたメロディ・経過音・倚音・反復打鍵等による新コード生成は無視する。
+        // （コード進行はペダル踏み直し時に確定される）
+        if (isPedalDown && hasActiveCommittedChord && !(isSubsetGrowth && !isNewChordStrike))
         {
-            const int currBass = currentState.notes.front();
-            const int candBass = newNotes.front();
-            const bool sameBassPc = (((candBass % 12) + 12) % 12) == (((currBass % 12) + 12) % 12);
-            const bool bassNotLower = (candBass >= currBass);
-
-            if (sameBassPc && bassNotLower)
-            {
-                std::set<int> currPcs;
-                for (int n : currentState.notes)
-                    currPcs.insert (((n % 12) + 12) % 12);
-
-                bool allInChord = true;
-                bool allAccompanimentInChord = true;
-                std::set<int> matchedAccompanimentPcs;
-
-                for (size_t i = 0; i < newNotes.size(); ++i)
-                {
-                    const int pc = ((newNotes[i] % 12) + 12) % 12;
-                    if (currPcs.find (pc) == currPcs.end())
-                    {
-                        allInChord = false;
-                        if (i + 1 < newNotes.size())
-                            allAccompanimentInChord = false;
-                    }
-                    else if (i + 1 < newNotes.size())
-                    {
-                        matchedAccompanimentPcs.insert (pc);
-                    }
-                }
-
-                if (allInChord || (allAccompanimentInChord && matchedAccompanimentPcs.size() >= 2))
-                {
-                    isSameChordContinuation = true;
-                }
-            }
-        }
-
-        if (isSameChordContinuation)
-        {
-            // 同一コードの継続：最前面コードの構成音は維持し、新リング送出（onNewChord）は行わない
+            // 最前面コード構成音は維持し、onNewChord（新リング送出）は行わない
             currentState.isDimmed = false;
             currentState.isChordCommitted = true;
             lastCommitTimeMs = currentTimeMs;
