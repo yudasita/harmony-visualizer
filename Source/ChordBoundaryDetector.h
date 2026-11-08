@@ -5,7 +5,8 @@
     HarmonyVisualizer - コード境界判定エンジン
 
     クオンタイズ窓（同時打鍵のズレ吸収）とダンパーペダル（CC64 / ピッチベンド代用）監視、
-    およびアルペジオ演奏判定とダイアド（2音以上）フィルタリングにより、
+    アルペジオ演奏判定とダイアド（2音以上）フィルタリング、および
+    メロディ経過音（非和声音）の自動判定とコード安定度に基づく後追い解決により、
     コードの切り替え境界を正確に検出する。
 
   ==============================================================================
@@ -58,6 +59,102 @@ public:
 
     double getArpeggioThresholdMs() const noexcept { return arpeggioThresholdMs; }
 
+    void setMelodyStepThresholdMs (double ms) noexcept
+    {
+        melodyStepThresholdMs = juce::jlimit (200.0, 3000.0, ms);
+    }
+
+    double getMelodyStepThresholdMs() const noexcept { return melodyStepThresholdMs; }
+
+    void setAppoggiaturaResolutionWindowMs (double ms) noexcept
+    {
+        appoggiaturaResolutionWindowMs = juce::jlimit (200.0, 2000.0, ms);
+    }
+
+    double getAppoggiaturaResolutionWindowMs() const noexcept { return appoggiaturaResolutionWindowMs; }
+
+    /** 和音の協和度・安定度スコアを計算する（五度圏距離・協和音程・三和音ボーナスに基づく） */
+    static float calculateChordStability (const std::vector<int>& midiNotes) noexcept
+    {
+        if (midiNotes.empty())
+            return 0.0f;
+
+        std::vector<int> uniquePcs;
+        for (int note : midiNotes)
+        {
+            const int pc = ((note % 12) + 12) % 12;
+            if (std::find (uniquePcs.begin(), uniquePcs.end(), pc) == uniquePcs.end())
+                uniquePcs.push_back (pc);
+        }
+
+        if (uniquePcs.size() < 2)
+            return 1.0f;
+
+        float score = 0.0f;
+
+        // 1. 各音対の五度圏距離に基づく協和度・緊張度
+        for (size_t i = 0; i < uniquePcs.size(); ++i)
+        {
+            const int circleI = (uniquePcs[i] * 7) % 12;
+            for (size_t j = i + 1; j < uniquePcs.size(); ++j)
+            {
+                const int circleJ = (uniquePcs[j] * 7) % 12;
+                int dist = std::abs (circleI - circleJ);
+                if (dist > 6)
+                    dist = 12 - dist;
+
+                switch (dist)
+                {
+                    case 1: score += 3.0f; break;  // 完全5度 / 4度（最も安定した音響的骨格）
+                    case 3: score += 2.5f; break;  // 短3度 / 長6度（柔和な協和）
+                    case 4: score += 2.5f; break;  // 長3度 / 短6度（明るい協和）
+                    case 2: score -= 1.5f; break;  // 長2度 / 短7度（全音の穏やかな緊張）
+                    case 5: score -= 4.5f; break;  // 短2度 / 長7度（半音の鋭い不協和・濁り）
+                    case 6: score -= 2.5f; break;  // 増4度 / 減5度（トライトーン緊張）
+                    default: break;
+                }
+            }
+        }
+
+        // 2. メジャー三和音 / マイナー三和音の骨格ボーナス
+        for (int root : uniquePcs)
+        {
+            const int majorThird = (root + 4) % 12;
+            const int minorThird = (root + 3) % 12;
+            const int fifth = (root + 7) % 12;
+
+            const bool hasFifth = (std::find (uniquePcs.begin(), uniquePcs.end(), fifth) != uniquePcs.end());
+            const bool hasM3 = (std::find (uniquePcs.begin(), uniquePcs.end(), majorThird) != uniquePcs.end());
+            const bool hasm3 = (std::find (uniquePcs.begin(), uniquePcs.end(), minorThird) != uniquePcs.end());
+
+            if (hasFifth && (hasM3 || hasm3))
+            {
+                score += 5.0f;
+
+                // ベース音がこの三和音のルートであればさらに安定ボーナス
+                const int bassPc = ((midiNotes.front() % 12) + 12) % 12;
+                if (bassPc == root)
+                    score += 2.0f;
+
+                break;
+            }
+        }
+
+        // 3. 実音での半音ぶつかり（隣接短2度）ペナルティ
+        for (size_t i = 0; i < midiNotes.size(); ++i)
+        {
+            for (size_t j = i + 1; j < midiNotes.size(); ++j)
+            {
+                if (std::abs (midiNotes[i] - midiNotes[j]) == 1)
+                {
+                    score -= 3.0f;
+                }
+            }
+        }
+
+        return score;
+    }
+
     /** 生MIDIイベントを処理する */
     void processMidiEvent (const QueuedMidiEvent& event, double currentTimeMs)
     {
@@ -104,6 +201,7 @@ public:
                 // クオンタイズ窓が満了
                 commitAccumulatedNotes (currentTimeMs);
                 isWindowOpen = false;
+                notesInCurrentWindow.clear();
             }
         }
 
@@ -145,6 +243,7 @@ public:
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
         sustainedNotes.clear();
+        notesInCurrentWindow.clear();
         isCc64Down = false;
         isPitchBendPedalDown = false;
         isPedalDown = false;
@@ -153,6 +252,8 @@ public:
         windowStartTimeMs = 0.0;
         lastCommitTimeMs = -9999.0;
         lastNoteOnTimeMs = -9999.0;
+        lastTopNote = -1;
+        lastTopNoteTimeMs = -9999.0;
         hasActiveCommittedChord = false;
         currentState = ChordState();
     }
@@ -164,7 +265,12 @@ private:
 
     int minNotesForChord { 2 };              // コード認識に必要な最低音数（単音を排除）
     double arpeggioThresholdMs { 450.0 };    // アルペジオ許容時間窓(ms)
+    double melodyStepThresholdMs { 1500.0 };  // メロディ経過音ステップ判定許容時間窓(ms)
+    double appoggiaturaResolutionWindowMs { 1000.0 }; // 倚音・掛留音の離鍵解決許容時間窓(ms)
+
     double lastNoteOnTimeMs { -9999.0 };     // 直前の打鍵時刻
+    int lastTopNote { -1 };                  // 直前のメロディ最高音（トップノート）
+    double lastTopNoteTimeMs { -9999.0 };    // 直前の最高音打鍵時刻
     bool hasActiveCommittedChord { false };  // 現在最前面にコミット済みコードがあるか
 
     bool isCc64Down { false };
@@ -175,6 +281,7 @@ private:
     std::set<int> currentlyHeldNotes;
     std::set<int> accumulatedNotes;
     std::set<int> sustainedNotes;
+    std::vector<int> notesInCurrentWindow;   // 現在のクオンタイズ窓内に新規打鍵された音
 
     ChordState currentState;
     NewChordCallback onNewChord;
@@ -238,15 +345,58 @@ private:
         refreshSoundingNotes();
 
         // クオンタイズ窓の開始または延長
+        if (!isWindowOpen)
+        {
+            notesInCurrentWindow.clear();
+        }
+        notesInCurrentWindow.push_back (noteNumber);
         isWindowOpen = true;
         windowStartTimeMs = currentTimeMs;
     }
 
     void handleNoteOff (int noteNumber, double currentTimeMs)
     {
-        juce::ignoreUnused (currentTimeMs);
         currentlyHeldNotes.erase (noteNumber);
         refreshSoundingNotes();
+
+        // コード安定度に基づく後追い解決（倚音・掛留音の離鍵による収束）:
+        // 和音確定直後（appoggiaturaResolutionWindowMs以内）に、
+        // 不安定音（テンション・掛留音）が離鍵され、残った保持音の安定度が向上した場合、
+        // 直前の確定コードからその不安定音を除外して安定コードへ上書き更新する。
+        if (hasActiveCommittedChord && !currentState.notes.empty()
+            && (currentTimeMs - lastCommitTimeMs) <= appoggiaturaResolutionWindowMs)
+        {
+            auto it = std::find (currentState.notes.begin(), currentState.notes.end(), noteNumber);
+            if (it != currentState.notes.end())
+            {
+                std::vector<int> remainingNotes = currentState.notes;
+                remainingNotes.erase (std::remove (remainingNotes.begin(), remainingNotes.end(), noteNumber), remainingNotes.end());
+
+                std::set<int> remainingPcs;
+                for (int n : remainingNotes)
+                    remainingPcs.insert (((n % 12) + 12) % 12);
+
+                if (remainingPcs.size() >= static_cast<size_t> (minNotesForChord))
+                {
+                    const float currentStability = calculateChordStability (currentState.notes);
+                    const float remainingStability = calculateChordStability (remainingNotes);
+
+                    if (remainingStability > currentStability + 0.5f)
+                    {
+                        currentState.notes = remainingNotes;
+                        accumulatedNotes = std::set<int> (remainingNotes.begin(), remainingNotes.end());
+                        if (!currentState.notes.empty())
+                        {
+                            lastTopNote = currentState.notes.back();
+                            lastTopNoteTimeMs = currentTimeMs;
+                        }
+
+                        if (onUpdateChord)
+                            onUpdateChord (currentState.notes);
+                    }
+                }
+            }
+        }
 
         // 指が1本ずつ離れるミリ秒単位のズレで構成音を削ってしまわないよう、
         // 直前の確定コード（currentState.notes）はそのまま維持する。
@@ -328,8 +478,11 @@ private:
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
         sustainedNotes.clear();
+        notesInCurrentWindow.clear();
         isWindowOpen = false;
         hasActiveCommittedChord = false;
+        lastTopNote = -1;
+        lastTopNoteTimeMs = -9999.0;
         refreshSoundingNotes();
 
         if (!currentState.notes.empty())
@@ -340,6 +493,9 @@ private:
     {
         if (accumulatedNotes.empty())
             return;
+
+        const int numNewNotes = static_cast<int> (notesInCurrentWindow.size());
+        const int singleNewNote = (numNewNotes == 1) ? notesInCurrentWindow.front() : -1;
 
         // 最低音数フィルタ: ピッチクラス数が minNotesForChord 未満の場合はコードとして確定しない
         // （単音演奏時は外周リングの soundingNotes のみ点灯させ、コード履歴キューへは送らない）
@@ -352,35 +508,149 @@ private:
             return;
         }
 
+        // =========================================================================
+        // Issue 47: メロディ・経過音（非和声音）の自動判定とコード安定度に基づく後追い解決
+        // =========================================================================
+        if (hasActiveCommittedChord && !currentState.notes.empty() && numNewNotes == 1)
+        {
+            const int newNote = singleNewNote;
+            const int currentBass = currentState.notes.front();
+            const int prevTop = (lastTopNote > 0 && (currentTimeMs - lastTopNoteTimeMs) <= melodyStepThresholdMs)
+                                    ? lastTopNote
+                                    : currentState.notes.back();
+
+            // 1. 低音・ベースラインの明確な変化があった場合はコード進行（新世代）へ委ねる
+            const bool isBassChange = (newNote < currentBass)
+                || (std::find (currentState.soundingNotes.begin(), currentState.soundingNotes.end(), currentBass) == currentState.soundingNotes.end());
+
+            if (!isBassChange)
+            {
+                // 伴奏（ベースおよび内声）が保持されているか判定
+                int accompanimentSoundingCount = 0;
+                for (size_t i = 0; i + 1 < currentState.notes.size(); ++i)
+                {
+                    const int note = currentState.notes[i];
+                    if (std::find (currentState.soundingNotes.begin(), currentState.soundingNotes.end(), note)
+                        != currentState.soundingNotes.end())
+                    {
+                        accompanimentSoundingCount++;
+                    }
+                }
+
+                // ペダル保持中、または鍵盤上で伴奏和音が押さえられている
+                const bool hasHeldAccompaniment = (accompanimentSoundingCount >= 1)
+                                                  && (isPedalDown || currentlyHeldNotes.size() >= 2);
+
+                const int semitoneDiff = std::abs (newNote - prevTop);
+                const bool isStepwise = (semitoneDiff == 1 || semitoneDiff == 2);
+                const bool isTopVoice = (newNote > currentBass)
+                                        && (newNote >= currentState.notes[std::max (0, static_cast<int> (currentState.notes.size()) - 2)]);
+
+                if (hasHeldAccompaniment && isStepwise && isTopVoice)
+                {
+                    // 2. コード安定度に基づく後追い解決の判定
+                    // 直前の不安定音（prevTop、または直前コードの最高音）を newNote で置換・解決した候補を生成
+                    std::vector<int> candidateNotes = currentState.notes;
+
+                    // 新しい音のピッチクラスが既に含まれているか確認
+                    const int newPc = ((newNote % 12) + 12) % 12;
+                    bool pcAlreadyInChord = false;
+                    for (size_t i = 0; i + 1 < candidateNotes.size(); ++i)
+                    {
+                        if ((((candidateNotes[i] % 12) + 12) % 12) == newPc)
+                        {
+                            pcAlreadyInChord = true;
+                            break;
+                        }
+                    }
+
+                    if (pcAlreadyInChord)
+                    {
+                        // 解決音が既に内声に含まれていた場合（例: F4 -> E4 で E音に収束）、不安定音を除外
+                        if (candidateNotes.size() > static_cast<size_t> (minNotesForChord))
+                            candidateNotes.pop_back();
+                        else
+                            candidateNotes.back() = newNote;
+                    }
+                    else
+                    {
+                        candidateNotes.back() = newNote;
+                    }
+
+                    std::sort (candidateNotes.begin(), candidateNotes.end());
+
+                    const float currentStability = calculateChordStability (currentState.notes);
+                    const float candidateStability = calculateChordStability (candidateNotes);
+
+                    if (candidateStability > currentStability + 0.5f)
+                    {
+                        // 安定度が向上 -> 不安定音（倚音・テンション）が安定コードトーンへ解決！
+                        currentState.notes = candidateNotes;
+                        accumulatedNotes = std::set<int> (candidateNotes.begin(), candidateNotes.end());
+                        currentState.isDimmed = false;
+                        currentState.isChordCommitted = true;
+                        lastCommitTimeMs = currentTimeMs;
+                        lastTopNote = newNote;
+                        lastTopNoteTimeMs = currentTimeMs;
+
+                        if (onUpdateChord)
+                            onUpdateChord (currentState.notes);
+
+                        return;
+                    }
+                    else
+                    {
+                        // 安定度が向上しない -> メロディ経過音（Passing tone / 装飾音）
+                        // コード構成音には含めず、最前面コードを濁らせない
+                        accumulatedNotes.erase (newNote);
+                        lastTopNote = newNote;
+                        lastTopNoteTimeMs = currentTimeMs;
+                        return;
+                    }
+                }
+            }
+        }
+
         std::vector<int> newNotes (accumulatedNotes.begin(), accumulatedNotes.end());
         const bool isDifferentChord = (newNotes != currentState.notes);
 
         // 既存の最前面コードに対する「同一コードの成長（アルペジオ追加）」かどうかの判定:
         // 過去の構成音のピッチクラスが、新しい構成音のピッチクラスにすべて含まれている（包含されている）場合
+        // かつ、ベース音（最低音）が変化していないこと（低音・ベースラインの変化は新コード進行とする）
         bool isSubsetGrowth = false;
         if (hasActiveCommittedChord && !currentState.notes.empty())
         {
-            std::set<int> prevPitchClasses;
-            for (int n : currentState.notes)
-                prevPitchClasses.insert (((n % 12) + 12) % 12);
+            const bool bassUnchanged = (!newNotes.empty() && newNotes.front() == currentState.notes.front());
 
-            bool allContained = true;
-            for (int pc : prevPitchClasses)
+            if (bassUnchanged)
             {
-                if (uniquePitchClasses.find (pc) == uniquePitchClasses.end())
+                std::set<int> prevPitchClasses;
+                for (int n : currentState.notes)
+                    prevPitchClasses.insert (((n % 12) + 12) % 12);
+
+                bool allContained = true;
+                for (int pc : prevPitchClasses)
                 {
-                    allContained = false;
-                    break;
+                    if (uniquePitchClasses.find (pc) == uniquePitchClasses.end())
+                    {
+                        allContained = false;
+                        break;
+                    }
                 }
+                if (allContained && uniquePitchClasses.size() >= prevPitchClasses.size())
+                    isSubsetGrowth = true;
             }
-            if (allContained && uniquePitchClasses.size() >= prevPitchClasses.size())
-                isSubsetGrowth = true;
         }
 
         currentState.notes = newNotes;
         currentState.isDimmed = false;
         currentState.isChordCommitted = true;
         lastCommitTimeMs = currentTimeMs;
+        if (!currentState.notes.empty())
+        {
+            lastTopNote = currentState.notes.back();
+            lastTopNoteTimeMs = currentTimeMs;
+        }
 
         if (isDifferentChord)
         {
