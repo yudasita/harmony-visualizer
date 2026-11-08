@@ -30,7 +30,7 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
     });
 
     startTimerHz (60);
-    setResizable (true, true);
+    setResizable (true, false);
     setResizeLimits (300, 300, 1000, 1000);
 }
 
@@ -80,6 +80,13 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.35f));
     const juce::String debugBuildText = "Debug Build: " + juce::String (__DATE__) + " " + juce::String (__TIME__);
     g.drawText (debugBuildText, getLocalBounds().removeFromBottom (16).reduced (8, 0), juce::Justification::bottomRight, false);
+#else
+    // リリースビルド用バージョン表示バッジ（控えめに表示）
+    // TODO: Issue #32（設定パネルUI基盤）実装時に、このバージョン表示は設定画面内の情報項目（About）へ移設する
+    g.setFont (juce::FontOptions (10.0f));
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    const juce::String releaseVersionText = "v" + juce::String (ProjectInfo::versionString);
+    g.drawText (releaseVersionText, getLocalBounds().removeFromBottom (16).reduced (8, 0), juce::Justification::bottomRight, false);
 #endif
 }
 
