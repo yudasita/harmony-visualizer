@@ -66,6 +66,14 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     drawPastChordLayers (g);
     drawVoiceLeadingConnections (g);
     drawForegroundChordLayer (g);
+
+#if JUCE_DEBUG || defined(_DEBUG) || defined(DEBUG)
+    // デバッグビルド識別用バッジ（画面最下部にビルド日時を控えめに表示）
+    g.setFont (juce::FontOptions (10.0f));
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    const juce::String debugBuildText = "Debug Build: " + juce::String (__DATE__) + " " + juce::String (__TIME__);
+    g.drawText (debugBuildText, getLocalBounds().removeFromBottom (16).reduced (8, 0), juce::Justification::bottomRight, false);
+#endif
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawBackgroundGuides (juce::Graphics& g)
