@@ -54,16 +54,13 @@ struct VoiceLeadingConnection
           type (connectionType),
           semitoneDistance (toNote - fromNote)
     {
-        fromPitchClass = ((fromNote % 12) + 12) % 12;
-        fromCircleIndex = (fromPitchClass * 7) % 12;
+        fromPitchClass = ChordEvent::normalizePitchClass (fromNote);
+        fromCircleIndex = ChordEvent::pitchClassToCircleIndex (fromPitchClass);
 
-        toPitchClass = ((toNote % 12) + 12) % 12;
-        toCircleIndex = (toPitchClass * 7) % 12;
+        toPitchClass = ChordEvent::normalizePitchClass (toNote);
+        toCircleIndex = ChordEvent::pitchClassToCircleIndex (toPitchClass);
 
-        int cDist = std::abs (fromCircleIndex - toCircleIndex);
-        if (cDist > 6)
-            cDist = 12 - cDist;
-        circleDistance = cDist;
+        circleDistance = ChordEvent::circleDistance (fromCircleIndex, toCircleIndex);
     }
 
     bool isBassLine() const noexcept          { return type == Type::BassLine; }
@@ -95,12 +92,12 @@ struct VoiceLeadingCostParameters
     int wholeStepCost                { 220 }; // 全音（2半音）移動の基本コスト
     int leapBaseCost                 { 220 }; // 3半音以上の跳躍の基準コスト
     int leapQuadraticWeight          { 180 }; // 3半音以上の跳躍に対する非線形（二次）ペナルティ重み
-    int midiDistanceTieBreaker       { 4 };   // 実MIDIノート距離1半音あたりのタイブレーカー重み
+    int midiDistanceTieBreaker       { 4 };   // 実MIDIノート距離1半音あたりのタイブレイカー重み
 
     int tritoneHalfStepDownBonus     { 85 };  // トライトーン構成音の半音下行解決ボーナス（例: G7->CM7 の F->E）
     int tritoneHalfStepUpBonus       { 80 };  // トライトーン構成音の半音上行解決ボーナス（例: G7->C の B->C）
     int tritoneWholeStepDownBonus    { 30 };  // トライトーン構成音の全音下行解決ボーナス
-    int tritoneAntiResolutionPenalty { 160 }; // 半音解決先があるのに全音上行等で逃げる場合のペナルティ（F->G 抑止）
+    int tritoneAntiResolutionPenalty { 160 }; // 半音解決先があるのに全音上行等で逃げる場合のペナルティ（F->G 抑制）
 
     int leadingToneUpBonus           { 55 };  // 導音（長3度・長7度等）の主音・構成音への半音上行解決ボーナス
     int suspensionHalfStepDownBonus  { 50 };  // sus4・短6度（b6）・テンション等の半音下行解決ボーナス（F->E, Ab->G）
@@ -153,7 +150,7 @@ public:
         // ---------------------------------------------------------------------
         const int fromBass = (fromChord.bassNote >= 0) ? fromChord.bassNote : fromChord.midiNotes.front();
         const int toBass   = (toChord.bassNote >= 0)   ? toChord.bassNote   : toChord.midiNotes.front();
-        const int toBassPc = normalizePitchClass (toBass);
+        const int toBassPc = ChordEvent::normalizePitchClass (toBass);
 
         connections.emplace_back (fromBass, toBass, VoiceLeadingConnection::Type::BassLine);
 
@@ -182,10 +179,10 @@ public:
         std::vector<PivotPair> pivotCandidates;
         for (size_t i = 0; i < fromUpper.size(); ++i)
         {
-            const int fPc = normalizePitchClass (fromUpper[i]);
+            const int fPc = ChordEvent::normalizePitchClass (fromUpper[i]);
             for (size_t j = 0; j < toUpper.size(); ++j)
             {
-                const int tPc = normalizePitchClass (toUpper[j]);
+                const int tPc = ChordEvent::normalizePitchClass (toUpper[j]);
                 const int dist = std::abs (fromUpper[i] - toUpper[j]);
                 if (fPc == tPc && dist <= params.maxPivotOctaveDistance)
                 {
@@ -217,7 +214,7 @@ public:
         // 上声部で未マッチだが toBass と同一ピッチクラスの共通音がある場合（例: Fm -> C の C音保持）
         for (size_t i = 0; i < fromUpper.size(); ++i)
         {
-            if (!fromMatched[i] && normalizePitchClass (fromUpper[i]) == toBassPc)
+            if (!fromMatched[i] && ChordEvent::normalizePitchClass (fromUpper[i]) == toBassPc)
             {
                 const int dist = std::abs (fromUpper[i] - toBass);
                 if (dist <= params.maxPivotOctaveDistance)
@@ -255,7 +252,7 @@ public:
         for (size_t j = 0; j < toUpper.size(); ++j)
         {
             const int note = toUpper[j];
-            const int pc = normalizePitchClass (note);
+            const int pc = ChordEvent::normalizePitchClass (note);
             const int initUse = toMatched[j] ? 1 : 0;
 
             bool merged = false;
@@ -298,7 +295,7 @@ public:
             }
         }
 
-        // 最適割当の探索（M <= 6 の場合は分枝限定法で厳密最小コスト解を探索）
+        // 最適割当の探索（M <= 6 の場合は分岐限定法で厳密最小コスト解を探索）
         std::vector<size_t> bestAssignment (M, 0);
         if (M <= 6)
         {
@@ -429,18 +426,18 @@ public:
         else
             baseCost = params.leapBaseCost + (absPc - 2) * (absPc - 2) * params.leapQuadraticWeight;
 
-        // オクターブ・実ノート距離の微小タイブレーカー
+        // オクターブ・実ノート距離の微小タイブレイカー
         const int midiDist = std::min (12, std::abs (toNote - fromNote));
         int totalCost = baseCost + midiDist * params.midiDistanceTieBreaker;
 
-        const int fromPc = normalizePitchClass (fromNote);
-        const int toPc   = normalizePitchClass (toNote);
+        const int fromPc = ChordEvent::normalizePitchClass (fromNote);
+        const int toPc   = ChordEvent::normalizePitchClass (toNote);
         const int fromBassPc = (fromChord.bassNote >= 0)
-            ? normalizePitchClass (fromChord.bassNote)
-            : (fromChord.midiNotes.empty() ? -1 : normalizePitchClass (fromChord.midiNotes.front()));
+            ? ChordEvent::normalizePitchClass (fromChord.bassNote)
+            : (fromChord.midiNotes.empty() ? -1 : ChordEvent::normalizePitchClass (fromChord.midiNotes.front()));
         const int toBassPc = (toChord.bassNote >= 0)
-            ? normalizePitchClass (toChord.bassNote)
-            : (toChord.midiNotes.empty() ? -1 : normalizePitchClass (toChord.midiNotes.front()));
+            ? ChordEvent::normalizePitchClass (toChord.bassNote)
+            : (toChord.midiNotes.empty() ? -1 : ChordEvent::normalizePitchClass (toChord.midiNotes.front()));
 
         // 2. トライトーン解決引力ボーナス ＆ 反解決ペナルティ
         if (isTritonePitchClassInChord (fromNote, fromChord))
@@ -448,7 +445,7 @@ public:
             const int halfStepDownPc = (fromPc + 11) % 12;
             const int halfStepUpPc   = (fromPc + 1) % 12;
             const bool hasHalfStepTargetInToChord =
-                hasPitchClassInChord (halfStepDownPc, toChord) || hasPitchClassInChord (halfStepUpPc, toChord);
+                toChord.hasPitchClass (halfStepDownPc) || toChord.hasPitchClass (halfStepUpPc);
 
             if (deltaPc == -1)
             {
@@ -505,41 +502,19 @@ public:
     }
 
 private:
-    static int normalizePitchClass (int midiNote) noexcept
-    {
-        return ((midiNote % 12) + 12) % 12;
-    }
-
     static int signedPitchClassDelta (int fromNote, int toNote) noexcept
     {
-        const int fPc = normalizePitchClass (fromNote);
-        const int tPc = normalizePitchClass (toNote);
+        const int fPc = ChordEvent::normalizePitchClass (fromNote);
+        const int tPc = ChordEvent::normalizePitchClass (toNote);
         return (tPc - fPc + 18) % 12 - 6;
-    }
-
-    static bool hasPitchClassInChord (int pc, const ChordEvent& chord) noexcept
-    {
-        const int normPc = normalizePitchClass (pc);
-        for (int existingPc : chord.pitchClasses)
-        {
-            if (existingPc == normPc)
-                return true;
-        }
-        for (int note : chord.midiNotes)
-        {
-            if (normalizePitchClass (note) == normPc)
-                return true;
-        }
-        return false;
     }
 
     static bool isTritonePitchClassInChord (int note, const ChordEvent& chord) noexcept
     {
-        const int pc = normalizePitchClass (note);
-        for (int otherNote : chord.midiNotes)
+        const int targetCircleIdx = ChordEvent::pitchClassToCircleIndex (ChordEvent::normalizePitchClass (note));
+        for (const auto& pair : chord.tritonePairs)
         {
-            const int otherPc = normalizePitchClass (otherNote);
-            if (std::abs (pc - otherPc) == 6)
+            if (pair.first == targetCircleIdx || pair.second == targetCircleIdx)
                 return true;
         }
         return false;
@@ -549,7 +524,7 @@ private:
     {
         for (int otherNote : chord.midiNotes)
         {
-            const int otherPc = normalizePitchClass (otherNote);
+            const int otherPc = ChordEvent::normalizePitchClass (otherNote);
             if (otherPc == pc)
                 continue;
             const int diff = std::min (std::abs (pc - otherPc), 12 - std::abs (pc - otherPc));

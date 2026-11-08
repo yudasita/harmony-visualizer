@@ -62,19 +62,40 @@ struct ChordEvent
         return (circleIdx >= 0 && circleIdx < 12) && ((circleMask & (1u << circleIdx)) != 0);
     }
 
-    bool hasPitchClass (int pc) const noexcept
+    // =========================================================================
+    // 音楽理論変換・幾何学ヘルパー関数（インライン共通ユーティリティ）
+    // =========================================================================
+
+    /** 任意のMIDIノート番号（負数を含む）を 0〜11 のピッチクラスへ正規化する */
+    static int normalizePitchClass (int midiNote) noexcept
     {
-        const int normPc = ((pc % 12) + 12) % 12;
-        return hasCircleIndex ((normPc * 7) % 12);
+        return ((midiNote % 12) + 12) % 12;
     }
 
-    /**
-        五度圏インデックス（0〜11）からピッチクラス（0〜11）へ逆変換する
-        (pc * 7) % 12 == circleIdx  <=>  pc = (circleIdx * 7) % 12
-    */
+    /** ピッチクラス（0〜11）から五度圏インデックス（0〜11、12時=C(0)、時計回り）へ変換する */
+    static int pitchClassToCircleIndex (int pc) noexcept
+    {
+        return (((pc % 12) + 12) * 7) % 12;
+    }
+
+    /** 五度圏インデックス（0〜11）からピッチクラス（0〜11）へ逆変換する
+        (pc * 7) % 12 == circleIdx  <=>  pc = (circleIdx * 7) % 12 */
     static int circleIndexToPitchClass (int circleIdx) noexcept
     {
         return (((circleIdx % 12) + 12) * 7) % 12;
+    }
+
+    /** 2つの五度圏インデックス間の最短幾何学距離（0〜6）を計算する */
+    static int circleDistance (int c1, int c2) noexcept
+    {
+        const int dist = std::abs (c1 - c2);
+        return (dist > 6) ? (12 - dist) : dist;
+    }
+
+    bool hasPitchClass (int pc) const noexcept
+    {
+        const int normPc = normalizePitchClass (pc);
+        return hasCircleIndex (pitchClassToCircleIndex (normPc));
     }
 
     /**
@@ -121,7 +142,7 @@ struct ChordEvent
             // ベース音に対して完全4度（5半音 = sus4）またはトライトーン（6半音）を形成している場合は未解決の緊張音
             if (subsequentChord.bassNote >= 0)
             {
-                const int bassPc = ((subsequentChord.bassNote % 12) + 12) % 12;
+                const int bassPc = normalizePitchClass (subsequentChord.bassNote);
                 const int intervalFromBass = (pc - bassPc + 12) % 12;
                 if (intervalFromBass == 5 || intervalFromBass == 6)
                     return false;
@@ -261,39 +282,35 @@ struct ChordEvent
         std::sort (chord.midiNotes.begin(), chord.midiNotes.end());
 
         chord.bassNote = chord.midiNotes.front();
-        chord.bassCircleIndex = (((chord.bassNote % 12) + 12) * 7) % 12;
+        chord.bassCircleIndex = pitchClassToCircleIndex (normalizePitchClass (chord.bassNote));
 
-        std::vector<int> uniquePcs;
-        std::vector<int> uniqueCircles;
+        uint16_t pcMask = 0;
+        chord.pitchClasses.reserve (12);
+        chord.circleIndices.reserve (12);
 
         for (int note : chord.midiNotes)
         {
-            const int pc = ((note % 12) + 12) % 12;
-            const int circleIdx = (pc * 7) % 12;
-
-            if (std::find (uniquePcs.begin(), uniquePcs.end(), pc) == uniquePcs.end())
-                uniquePcs.push_back (pc);
-
-            if (std::find (uniqueCircles.begin(), uniqueCircles.end(), circleIdx) == uniqueCircles.end())
+            const int pc = normalizePitchClass (note);
+            if ((pcMask & (1u << pc)) == 0)
             {
-                uniqueCircles.push_back (circleIdx);
+                pcMask |= static_cast<uint16_t> (1u << pc);
+                chord.pitchClasses.push_back (pc);
+
+                const int circleIdx = pitchClassToCircleIndex (pc);
+                chord.circleIndices.push_back (circleIdx);
                 chord.circleMask |= static_cast<uint16_t> (1u << circleIdx);
             }
         }
 
-        std::sort (uniquePcs.begin(), uniquePcs.end());
-        std::sort (uniqueCircles.begin(), uniqueCircles.end());
-
-        chord.pitchClasses = std::move (uniquePcs);
-        chord.circleIndices = std::move (uniqueCircles);
+        std::sort (chord.pitchClasses.begin(), chord.pitchClasses.end());
+        std::sort (chord.circleIndices.begin(), chord.circleIndices.end());
 
         // トライトーン（半音6 / 五度圏対角線距離6）ペアの検出
         for (size_t i = 0; i < chord.circleIndices.size(); ++i)
         {
             for (size_t j = i + 1; j < chord.circleIndices.size(); ++j)
             {
-                const int dist = std::abs (chord.circleIndices[i] - chord.circleIndices[j]);
-                if (dist == 6)
+                if (circleDistance (chord.circleIndices[i], chord.circleIndices[j]) == 6)
                 {
                     chord.tritonePairs.emplace_back (chord.circleIndices[i], chord.circleIndices[j]);
                 }
