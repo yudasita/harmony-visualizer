@@ -201,6 +201,7 @@ public:
         if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
         {
             isBuildingInitialChord = false;
+            isInitialArpeggioForPedalAllowed = false;
         }
 
         if (isWindowOpen)
@@ -265,6 +266,8 @@ public:
         lastTopNoteTimeMs = -9999.0;
         hasActiveCommittedChord = false;
         isBuildingInitialChord = false;
+        isInitialArpeggioForPedalAllowed = true;
+        isNewChordStrike = false;
         currentState = ChordState();
     }
 
@@ -283,6 +286,8 @@ private:
     double lastTopNoteTimeMs { -9999.0 };    // 直前の最高音打鍵時刻
     bool hasActiveCommittedChord { false };  // 現在最前面にコミット済みコードがあるか
     bool isBuildingInitialChord { false };   // 和音の初期構築（アルペジオ等）フェーズ中フラグ
+    bool isInitialArpeggioForPedalAllowed { true }; // ペダル踏下後の初回アルペジオ許容フラグ
+    bool isNewChordStrike { false };         // アルペジオ継続ではない新規和音打鍵フラグ
 
     bool isCc64Down { false };
     bool isPitchBendPedalDown { false };
@@ -330,14 +335,32 @@ private:
             sustainedNotes.insert (noteNumber);
 
         // アルペジオ継続（同一コードの蓄積・成長）かどうかの判定:
-        // 1. ペダルが踏まれている、または直前からの押鍵が残っている（レガート/和音押さえ）
-        // 2. または、直前のノートオンから arpeggioThresholdMs 以内の打鍵である
+        // 1. ペダルが踏まれている場合:
+        //    ペダルを踏んでから「最初のアルペジオ構築中（isInitialArpeggioForPedalAllowed）」であり、
+        //    かつ直前の打鍵から arpeggioThresholdMs 以内である場合のみ継続とする。
+        //    （ペダルを踏み続けたままの反復打鍵・ジャンジャン演奏が誤ってアルペジオ継続されるのを防止）
+        // 2. ペダルが踏まれていない場合:
+        //    直前からの押鍵が残っている（レガート/和音押さえ）、または arpeggioThresholdMs 以内の打鍵であること
         // 3. かつ、ペダル解放（踏み直し）直後ではなく、演奏待機状態（dimmed）でもない
-        const bool isLegatoOrPedal = isPedalDown || (currentlyHeldNotes.size() > 1);
-        const bool isWithinArpeggioWindow = (elapsedSinceLastNote <= arpeggioThresholdMs);
-        const bool isArpeggioContinuation = (isLegatoOrPedal || isWithinArpeggioWindow)
-                                            && !pedalReleasedSinceLastChord
-                                            && !currentState.isDimmed;
+        bool isArpeggioContinuation = false;
+        if (!currentState.isDimmed && !pedalReleasedSinceLastChord)
+        {
+            if (isPedalDown)
+            {
+                if (isInitialArpeggioForPedalAllowed && (elapsedSinceLastNote <= arpeggioThresholdMs))
+                {
+                    isArpeggioContinuation = true;
+                }
+            }
+            else
+            {
+                const bool isLegatoOrArpeggio = (currentlyHeldNotes.size() > 1) || (elapsedSinceLastNote <= arpeggioThresholdMs);
+                if (isLegatoOrArpeggio)
+                {
+                    isArpeggioContinuation = true;
+                }
+            }
+        }
 
         if (!isArpeggioContinuation)
         {
@@ -346,6 +369,7 @@ private:
             pedalReleasedSinceLastChord = false;
             hasActiveCommittedChord = false;
             isBuildingInitialChord = true;
+            isNewChordStrike = true;
         }
         else
         {
@@ -411,6 +435,12 @@ private:
             }
         }
 
+        if (noteNumber == lastTopNote)
+        {
+            lastTopNote = !currentState.notes.empty() ? currentState.notes.back() : -1;
+            lastTopNoteTimeMs = currentTimeMs;
+        }
+
         // 指が1本ずつ離れるミリ秒単位のズレで構成音を削ってしまわないよう、
         // 直前の確定コード（currentState.notes）はそのまま維持する。
         // 全鍵盤が離鍵され、ペダルもOFFになったら直ちに待機状態（dimmed）へ移行する。
@@ -428,10 +458,12 @@ private:
         {
             // ペダルが踏まれた（ON）：現在押している鍵盤をサスティン対象に追加
             sustainedNotes = currentlyHeldNotes;
+            isInitialArpeggioForPedalAllowed = true;
         }
         else if (isPedalDown && !down)
         {
             // ペダルが離された（OFF）
+            isInitialArpeggioForPedalAllowed = true;
             pedalReleasedSinceLastChord = true;
             sustainedNotes.clear();
 
@@ -522,9 +554,18 @@ private:
             return;
         }
 
+        const double elapsedSinceLastNote = (lastNoteOnTimeMs > 0.0) ? (currentTimeMs - lastNoteOnTimeMs) : 99999.0;
+        if (numNewNotes >= 3 || (numNewNotes >= minNotesForChord && elapsedSinceLastNote > arpeggioThresholdMs))
+        {
+            // 同時打鍵で完全な和音が鳴らされた場合（和音ストローク）、アルペジオ初期構築は完了
+            isInitialArpeggioForPedalAllowed = false;
+            isBuildingInitialChord = false;
+        }
+
         if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
         {
             isBuildingInitialChord = false;
+            isInitialArpeggioForPedalAllowed = false;
         }
 
         // =========================================================================
@@ -633,6 +674,7 @@ private:
                         accumulatedNotes.erase (newNote);
                         lastTopNote = newNote;
                         lastTopNoteTimeMs = currentTimeMs;
+                        isNewChordStrike = false;
                         return;
                     }
                 }
@@ -680,9 +722,9 @@ private:
             lastTopNoteTimeMs = currentTimeMs;
         }
 
-        if (isDifferentChord)
+        if (isDifferentChord || isNewChordStrike)
         {
-            if (hasActiveCommittedChord && isSubsetGrowth)
+            if (hasActiveCommittedChord && isSubsetGrowth && !isNewChordStrike)
             {
                 // アルペジオによる構成音追加：最前面（Z=0）を上書き更新（奥へは押し出さない）
                 if (onUpdateChord)
@@ -690,11 +732,12 @@ private:
             }
             else
             {
-                // 新コードへの進行：直前のコードを奥へ送り、新コードを最前面へプッシュ
+                // 新コードへの進行または新規和音打鍵：直前のコードを奥へ送り、新コードを最前面へプッシュ
                 hasActiveCommittedChord = true;
                 if (onNewChord)
                     onNewChord (currentState.notes);
             }
         }
+        isNewChordStrike = false;
     }
 };
