@@ -5,9 +5,10 @@
     HarmonyVisualizer - ボイスリーディング解析と声部接続ソルバー
 
     直前コード（奥・fromChord）から現在コード（手前・toChord）への遷移における
-    声部連結（ボイスリーディング）の最小移動コストペアリングを計算する。
-    最低音（ベースライン優先）、共通音（Pivot Note 保持）、トライトーン解決、
-    最短半音移動、多対1の合流マッチングを提供する。
+    声部連結（ボイスリーディング）の音楽理論的引力・最小移動コストペアリングを計算する。
+    最低音（ベースライン優先）、共通音（Pivot Note 保持）、トライトーン解決引力、
+    導音の上行解決、掛留音（sus4）・テンションの下行解決、近接移動、
+    および多対1の合流マッチングを提供する。
 
   ==============================================================================
 */
@@ -28,7 +29,7 @@ struct VoiceLeadingConnection
     {
         BassLine,           // 最低音同士の接続（音程差不問・最優先）
         PivotNote,          // 共通音の保持（同ピッチクラス・平行接続）
-        Stepwise,           // 半音/全音進行（1〜2半音の近接移動）
+        Stepwise,           // 半音/全音進行（近接移動・導音/掛留音解決を含む）
         TritoneResolution,  // トライトーン解決（トライトーン構成音の半音・全音解決）
         Converged           // 多対1の合流（複数声部が同一ノートへ収束）
     };
@@ -85,9 +86,36 @@ struct VoiceLeadingConnection
     }
 };
 
+/**
+    音楽理論に基づく声部移動コスト・引力ボーナス設定パラメータ
+*/
+struct VoiceLeadingCostParameters
+{
+    int semitoneStepCost             { 100 }; // 半音（1半音）移動の基本コスト
+    int wholeStepCost                { 220 }; // 全音（2半音）移動の基本コスト
+    int leapBaseCost                 { 220 }; // 3半音以上の跳躍の基準コスト
+    int leapQuadraticWeight          { 180 }; // 3半音以上の跳躍に対する非線形（二次）ペナルティ重み
+    int midiDistanceTieBreaker       { 4 };   // 実MIDIノート距離1半音あたりのタイブレーカー重み
+
+    int tritoneHalfStepDownBonus     { 85 };  // トライトーン構成音の半音下行解決ボーナス（例: G7->CM7 の F->E）
+    int tritoneHalfStepUpBonus       { 80 };  // トライトーン構成音の半音上行解決ボーナス（例: G7->C の B->C）
+    int tritoneWholeStepDownBonus    { 30 };  // トライトーン構成音の全音下行解決ボーナス
+    int tritoneAntiResolutionPenalty { 160 }; // 半音解決先があるのに全音上行等で逃げる場合のペナルティ（F->G 抑止）
+
+    int leadingToneUpBonus           { 55 };  // 導音（長3度・長7度等）の主音・構成音への半音上行解決ボーナス
+    int suspensionHalfStepDownBonus  { 50 };  // sus4・短6度（b6）・テンション等の半音下行解決ボーナス（F->E, Ab->G）
+    int tensionWholeStepDownBonus    { 20 };  // 9th・5th等の全音下行解決ボーナス（D->C）
+
+    int convergencePenalty           { 45 };  // 同一ターゲット音への多対1合流ペナルティ
+    int voiceCrossingPenalty         { 35 };  // 声部交差（順序逆転）に対するソフトペナルティ
+    int maxPivotOctaveDistance       { 18 };  // 共通音保持（PivotNote）として優先する最大実ノート距離
+};
+
 class VoiceLeadingSolver
 {
 public:
+    using CostParameters = VoiceLeadingCostParameters;
+
     VoiceLeadingSolver() = default;
 
     /**
@@ -99,18 +127,21 @@ public:
            最低音同士 (bassNote) は音程距離に関わらず必ず最優先で接続 (Type::BassLine)。
         2. ルール2 (共通音の保持 / PivotNote):
            残りの上声部について、同一ピッチクラスを持つノート同士を最小半音差で平行接続 (Type::PivotNote)。
-        3. ルール3 (最短半音移動 ＆ 合流マッチング):
-           残りの上声部について、半音・全音の近い音へ最小コストでペアリング。
-           - 距離1〜2半音かつトライトーン構成音の場合は Type::TritoneResolution。
-           - その他の1対1近接ペアリングは Type::Stepwise。
-           - 多対1の合流（残余ノートの収束）は Type::Converged。
-
-        @param fromChord 奥のコード（過去の世代）
-        @param toChord   手前のコード（最新または直前の世代）
-        @return 計算された声部接続リスト
+           上声部に同一ピッチクラスがない場合でも toBass と同一ピッチクラスであれば保持接続を許可。
+        3. ルール3 (音楽理論的引力コスト関数 ＆ 最適割当):
+           残りの上声部について、半音・全音移動コスト、3半音以上の跳躍ペナルティ、
+           およびトライトーン解決・導音解決・掛留音(sus4)/テンション下行解決の引力ボーナスを含む
+           総合コスト関数を最小化するペアリングを計算。
     */
     static std::vector<VoiceLeadingConnection> solve (const ChordEvent& fromChord,
-                                                     const ChordEvent& toChord)
+                                                      const ChordEvent& toChord)
+    {
+        return solve (fromChord, toChord, CostParameters{});
+    }
+
+    static std::vector<VoiceLeadingConnection> solve (const ChordEvent& fromChord,
+                                                      const ChordEvent& toChord,
+                                                      const CostParameters& params)
     {
         std::vector<VoiceLeadingConnection> connections;
 
@@ -122,6 +153,7 @@ public:
         // ---------------------------------------------------------------------
         const int fromBass = (fromChord.bassNote >= 0) ? fromChord.bassNote : fromChord.midiNotes.front();
         const int toBass   = (toChord.bassNote >= 0)   ? toChord.bassNote   : toChord.midiNotes.front();
+        const int toBassPc = normalizePitchClass (toBass);
 
         connections.emplace_back (fromBass, toBass, VoiceLeadingConnection::Type::BassLine);
 
@@ -150,13 +182,14 @@ public:
         std::vector<PivotPair> pivotCandidates;
         for (size_t i = 0; i < fromUpper.size(); ++i)
         {
-            const int fPc = ((fromUpper[i] % 12) + 12) % 12;
+            const int fPc = normalizePitchClass (fromUpper[i]);
             for (size_t j = 0; j < toUpper.size(); ++j)
             {
-                const int tPc = ((toUpper[j] % 12) + 12) % 12;
-                if (fPc == tPc)
+                const int tPc = normalizePitchClass (toUpper[j]);
+                const int dist = std::abs (fromUpper[i] - toUpper[j]);
+                if (fPc == tPc && dist <= params.maxPivotOctaveDistance)
                 {
-                    pivotCandidates.push_back ({ i, j, std::abs (fromUpper[i] - toUpper[j]) });
+                    pivotCandidates.push_back ({ i, j, dist });
                 }
             }
         }
@@ -181,187 +214,348 @@ public:
             }
         }
 
+        // 上声部で未マッチだが toBass と同一ピッチクラスの共通音がある場合（例: Fm -> C の C音保持）
+        for (size_t i = 0; i < fromUpper.size(); ++i)
+        {
+            if (!fromMatched[i] && normalizePitchClass (fromUpper[i]) == toBassPc)
+            {
+                const int dist = std::abs (fromUpper[i] - toBass);
+                if (dist <= params.maxPivotOctaveDistance)
+                {
+                    fromMatched[i] = true;
+                    connections.emplace_back (fromUpper[i],
+                                              toBass,
+                                              VoiceLeadingConnection::Type::PivotNote);
+                }
+            }
+        }
+
         // ---------------------------------------------------------------------
-        // ルール3: 最短半音移動 ＆ 合流マッチング
+        // ルール3: 音楽的引力コスト関数による最適ペアリング ＆ 合流制御
         // ---------------------------------------------------------------------
         std::vector<int> remFrom;
         for (size_t i = 0; i < fromUpper.size(); ++i)
             if (!fromMatched[i])
                 remFrom.push_back (fromUpper[i]);
 
-        std::vector<int> remTo;
-        for (size_t j = 0; j < toUpper.size(); ++j)
-            if (!toMatched[j])
-                remTo.push_back (toUpper[j]);
-
         if (remFrom.empty())
             return connections;
 
-        // fromChord にてトライトーンを形成していたピッチクラスかどうかを判定
-        auto isTritonePitchClassInFromChord = [&] (int note) -> bool
+        // ターゲット候補リストの構築（toChord の各構成音）
+        struct TargetCandidate
         {
-            const int pc = ((note % 12) + 12) % 12;
-            for (int otherNote : fromChord.midiNotes)
-            {
-                const int otherPc = ((otherNote % 12) + 12) % 12;
-                if (std::abs (pc - otherPc) == 6)
-                    return true;
-            }
-            return false;
+            int midiNote;
+            int pitchClass;
+            int initialUsageCount; // 0 = 未割当の toUpper, 1 = BassLine/PivotNote で既に使用中
         };
 
-        // remTo が空の場合、remFrom の全ノートは toChord の最も近い音（ベースまたは既存上声部）へ合流
-        if (remTo.empty())
+        std::vector<TargetCandidate> candidates;
+        candidates.push_back ({ toBass, toBassPc, 1 });
+
+        for (size_t j = 0; j < toUpper.size(); ++j)
         {
-            for (int f : remFrom)
+            const int note = toUpper[j];
+            const int pc = normalizePitchClass (note);
+            const int initUse = toMatched[j] ? 1 : 0;
+
+            bool merged = false;
+            for (auto& existing : candidates)
             {
-                int bestTarget = toBass;
-                int bestDist = std::abs (f - toBass);
-
-                for (int t : toChord.midiNotes)
+                if (existing.pitchClass == pc)
                 {
-                    const int d = std::abs (f - t);
-                    if (d < bestDist)
+                    if (initUse < existing.initialUsageCount)
                     {
-                        bestDist = d;
-                        bestTarget = t;
+                        existing.midiNote = note;
+                        existing.initialUsageCount = initUse;
                     }
+                    merged = true;
+                    break;
                 }
-
-                connections.emplace_back (f, bestTarget, VoiceLeadingConnection::Type::Converged);
             }
-            return connections;
+            if (!merged)
+                candidates.push_back ({ note, pc, initUse });
         }
 
-        // 単調増加DPによる最小移動コストマッチング
+        std::sort (candidates.begin(), candidates.end(),
+                   [] (const TargetCandidate& a, const TargetCandidate& b) {
+                       return a.midiNote < b.midiNote;
+                   });
+
         const size_t M = remFrom.size();
-        const size_t K = remTo.size();
+        const size_t C = candidates.size();
 
-        // 1対1ペアの解決種別判定ヘルパー
-        auto determineConnectionType = [&] (int fromNote, int toNote) -> VoiceLeadingConnection::Type
+        // 各 (fromIdx, candIdx) ペアの基本遷移コスト行列を事前計算
+        std::vector<std::vector<int>> pairCosts (M, std::vector<int> (C, 0));
+        for (size_t i = 0; i < M; ++i)
         {
-            const int dist = std::abs (toNote - fromNote);
-            if (isTritonePitchClassInFromChord (fromNote) && dist >= 1 && dist <= 2)
-                return VoiceLeadingConnection::Type::TritoneResolution;
-
-            return VoiceLeadingConnection::Type::Stepwise;
-        };
-
-        if (M <= K)
-        {
-            // M個の from ノートを K個の to ノートの部分集合と1対1マッチング
-            std::vector<size_t> matchedToIndices = matchMonotonic (remFrom, remTo);
-
-            for (size_t i = 0; i < M; ++i)
+            for (size_t c = 0; c < C; ++c)
             {
-                const int f = remFrom[i];
-                const int t = remTo[matchedToIndices[i]];
-                connections.emplace_back (f, t, determineConnectionType (f, t));
+                pairCosts[i][c] = evaluatePairCost (remFrom[i],
+                                                    candidates[c].midiNote,
+                                                    fromChord,
+                                                    toChord,
+                                                    params);
             }
+        }
+
+        // 最適割当の探索（M <= 6 の場合は分枝限定法で厳密最小コスト解を探索）
+        std::vector<size_t> bestAssignment (M, 0);
+        if (M <= 6)
+        {
+            int bestTotalCost = std::numeric_limits<int>::max() / 2;
+            std::vector<size_t> currentAssignment (M, 0);
+            std::vector<int> usageCounts (C, 0);
+            for (size_t c = 0; c < C; ++c)
+                usageCounts[c] = candidates[c].initialUsageCount;
+
+            auto search = [&] (auto& self, size_t idx, int currentCost) -> void
+            {
+                if (currentCost >= bestTotalCost)
+                    return;
+
+                if (idx == M)
+                {
+                    bestTotalCost = currentCost;
+                    bestAssignment = currentAssignment;
+                    return;
+                }
+
+                for (size_t c = 0; c < C; ++c)
+                {
+                    int stepCost = pairCosts[idx][c];
+
+                    if (usageCounts[c] > 0)
+                        stepCost += params.convergencePenalty * usageCounts[c];
+
+                    const int targetNote = candidates[c].midiNote;
+                    for (size_t prev = 0; prev < idx; ++prev)
+                    {
+                        const int prevTargetNote = candidates[currentAssignment[prev]].midiNote;
+                        if (prevTargetNote > targetNote)
+                            stepCost += params.voiceCrossingPenalty;
+                    }
+
+                    currentAssignment[idx] = c;
+                    usageCounts[c] += 1;
+                    self (self, idx + 1, currentCost + stepCost);
+                    usageCounts[c] -= 1;
+                }
+            };
+
+            search (search, 0, 0);
         }
         else
         {
-            // M > K: K個の to ノートすべてに最も近い K個の from ノートを1対1マッチング
-            std::vector<size_t> matchedFromIndices = matchMonotonic (remTo, remFrom);
+            std::vector<int> usageCounts (C, 0);
+            for (size_t c = 0; c < C; ++c)
+                usageCounts[c] = candidates[c].initialUsageCount;
 
-            std::vector<bool> fromPaired (M, false);
-            for (size_t j = 0; j < K; ++j)
-            {
-                const size_t fromIdx = matchedFromIndices[j];
-                fromPaired[fromIdx] = true;
-                const int f = remFrom[fromIdx];
-                const int t = remTo[j];
-                connections.emplace_back (f, t, determineConnectionType (f, t));
-            }
-
-            // 余った M - K 個の from ノートは最も近い remTo へ合流
             for (size_t i = 0; i < M; ++i)
             {
-                if (!fromPaired[i])
+                int bestC = 0;
+                int minCost = std::numeric_limits<int>::max() / 2;
+                for (size_t c = 0; c < C; ++c)
                 {
-                    const int f = remFrom[i];
-                    int bestTarget = remTo.front();
-                    int bestDist = std::abs (f - bestTarget);
-
-                    for (int t : remTo)
+                    const int cost = pairCosts[i][c] + (usageCounts[c] > 0 ? params.convergencePenalty * usageCounts[c] : 0);
+                    if (cost < minCost)
                     {
-                        const int d = std::abs (f - t);
-                        if (d < bestDist)
-                        {
-                            bestDist = d;
-                            bestTarget = t;
-                        }
+                        minCost = cost;
+                        bestC = static_cast<int> (c);
                     }
-
-                    connections.emplace_back (f, bestTarget, VoiceLeadingConnection::Type::Converged);
                 }
+                bestAssignment[i] = static_cast<size_t> (bestC);
+                usageCounts[static_cast<size_t> (bestC)] += 1;
             }
+        }
+
+        // 接続種別（TritoneResolution / Stepwise / Converged）の決定
+        std::vector<int> assignedCountPerCand (C, 0);
+        std::vector<size_t> primaryVoiceForCand (C, M);
+
+        for (size_t i = 0; i < M; ++i)
+        {
+            const size_t c = bestAssignment[i];
+            assignedCountPerCand[c] += 1;
+            if (primaryVoiceForCand[c] == M || pairCosts[i][c] < pairCosts[primaryVoiceForCand[c]][c])
+            {
+                primaryVoiceForCand[c] = i;
+            }
+        }
+
+        for (size_t i = 0; i < M; ++i)
+        {
+            const size_t c = bestAssignment[i];
+            const int fromNote = remFrom[i];
+            const int toNote   = candidates[c].midiNote;
+            const int absPcDist = std::abs (signedPitchClassDelta (fromNote, toNote));
+
+            VoiceLeadingConnection::Type connType = VoiceLeadingConnection::Type::Stepwise;
+
+            if (isTritonePitchClassInChord (fromNote, fromChord) && absPcDist >= 1 && absPcDist <= 2)
+            {
+                connType = VoiceLeadingConnection::Type::TritoneResolution;
+            }
+            else if (primaryVoiceForCand[c] != i || (candidates[c].initialUsageCount > 0 && absPcDist > 2))
+            {
+                connType = VoiceLeadingConnection::Type::Converged;
+            }
+
+            connections.emplace_back (fromNote, toNote, connType);
         }
 
         return connections;
     }
 
-private:
     /**
-        ソート済みの source 配列（サイズ S）の各要素を、
-        同じくソート済みの target 配列（サイズ T, T >= S）の要素と
-        順序を保持したまま（声部交差なし）最小総距離で1対1ペアリングする。
-        @return source[i] にペアリングされた target のインデックス配列（サイズ S）
+        単一の声部遷移 (fromNote -> toNote) の音楽理論コストを評価する（テスト・検証用に公開）
     */
-    static std::vector<size_t> matchMonotonic (const std::vector<int>& source,
-                                               const std::vector<int>& target)
+    static int evaluatePairCost (int fromNote,
+                                 int toNote,
+                                 const ChordEvent& fromChord,
+                                 const ChordEvent& toChord,
+                                 const CostParameters& params = CostParameters{}) noexcept
     {
-        const size_t S = source.size();
-        const size_t T = target.size();
-        jassert (S <= T);
+        const int deltaPc = signedPitchClassDelta (fromNote, toNote);
+        const int absPc   = std::abs (deltaPc);
 
-        if (S == 0)
-            return {};
+        // 1. 基本の半音距離コスト（近接移動優遇・3半音以上の跳躍に非線形ペナルティ）
+        int baseCost = 0;
+        if (absPc == 0)
+            baseCost = 0;
+        else if (absPc == 1)
+            baseCost = params.semitoneStepCost;
+        else if (absPc == 2)
+            baseCost = params.wholeStepCost;
+        else
+            baseCost = params.leapBaseCost + (absPc - 2) * (absPc - 2) * params.leapQuadraticWeight;
 
-        if (S == T)
+        // オクターブ・実ノート距離の微小タイブレーカー
+        const int midiDist = std::min (12, std::abs (toNote - fromNote));
+        int totalCost = baseCost + midiDist * params.midiDistanceTieBreaker;
+
+        const int fromPc = normalizePitchClass (fromNote);
+        const int toPc   = normalizePitchClass (toNote);
+        const int fromBassPc = (fromChord.bassNote >= 0)
+            ? normalizePitchClass (fromChord.bassNote)
+            : (fromChord.midiNotes.empty() ? -1 : normalizePitchClass (fromChord.midiNotes.front()));
+        const int toBassPc = (toChord.bassNote >= 0)
+            ? normalizePitchClass (toChord.bassNote)
+            : (toChord.midiNotes.empty() ? -1 : normalizePitchClass (toChord.midiNotes.front()));
+
+        // 2. トライトーン解決引力ボーナス ＆ 反解決ペナルティ
+        if (isTritonePitchClassInChord (fromNote, fromChord))
         {
-            std::vector<size_t> result (S);
-            for (size_t i = 0; i < S; ++i)
-                result[i] = i;
-            return result;
-        }
+            const int halfStepDownPc = (fromPc + 11) % 12;
+            const int halfStepUpPc   = (fromPc + 1) % 12;
+            const bool hasHalfStepTargetInToChord =
+                hasPitchClassInChord (halfStepDownPc, toChord) || hasPitchClassInChord (halfStepUpPc, toChord);
 
-        // DP テーブル: dp[i][j] = source の先頭 i 個を target の先頭 j 個の部分集合とマッチさせる最小コスト
-        constexpr int INF = std::numeric_limits<int>::max() / 2;
-        std::vector<std::vector<int>> dp (S + 1, std::vector<int> (T + 1, INF));
-
-        for (size_t j = 0; j <= T; ++j)
-            dp[0][j] = 0;
-
-        for (size_t i = 1; i <= S; ++i)
-        {
-            for (size_t j = i; j <= T; ++j)
+            if (deltaPc == -1)
             {
-                const int costMatch = dp[i - 1][j - 1] + std::abs (source[i - 1] - target[j - 1]);
-                const int costSkip  = dp[i][j - 1];
-                dp[i][j] = std::min (costMatch, costSkip);
+                totalCost -= params.tritoneHalfStepDownBonus;
+            }
+            else if (deltaPc == +1)
+            {
+                totalCost -= params.tritoneHalfStepUpBonus;
+            }
+            else if (deltaPc == -2)
+            {
+                totalCost -= params.tritoneWholeStepDownBonus;
+            }
+            else if (deltaPc == +2 && hasHalfStepTargetInToChord)
+            {
+                totalCost += params.tritoneAntiResolutionPenalty;
             }
         }
 
-        // バックトラックで選択された target インデックスを復元
-        std::vector<size_t> result (S);
-        size_t i = S;
-        size_t j = T;
-
-        while (i > 0)
+        // 3. 導音（Leading Tone）の上行解決ボーナス（deltaPc == +1）
+        if (deltaPc == +1)
         {
-            if (j > i && dp[i][j] == dp[i][j - 1])
+            const int intervalFromBass = (fromBassPc >= 0) ? ((fromPc - fromBassPc + 12) % 12) : -1;
+            const bool isThirdOrSeventh = (intervalFromBass == 4 || intervalFromBass == 11 || intervalFromBass == 3);
+            if (toPc == toBassPc || isThirdOrSeventh)
             {
-                --j;
+                totalCost -= params.leadingToneUpBonus;
+            }
+        }
+
+        // 4. 掛留音（sus4）・短6度（b6）・テンションの下行解決ボーナス
+        if (deltaPc == -1)
+        {
+            const int intervalFromBass = (fromBassPc >= 0) ? ((fromPc - fromBassPc + 12) % 12) : -1;
+            const int intervalToBass   = (toBassPc >= 0)   ? ((toPc - toBassPc + 12) % 12)   : -1;
+
+            if (intervalFromBass == 5 || intervalFromBass == 8 || intervalFromBass == 10
+                || intervalToBass == 4 || intervalToBass == 7
+                || hasDissonanceInChord (fromPc, fromChord))
+            {
+                totalCost -= params.suspensionHalfStepDownBonus;
             }
             else
             {
-                result[i - 1] = j - 1;
-                --i;
-                --j;
+                totalCost -= (params.suspensionHalfStepDownBonus / 2);
             }
         }
+        else if (deltaPc == -2)
+        {
+            totalCost -= params.tensionWholeStepDownBonus;
+        }
 
-        return result;
+        return totalCost;
+    }
+
+private:
+    static int normalizePitchClass (int midiNote) noexcept
+    {
+        return ((midiNote % 12) + 12) % 12;
+    }
+
+    static int signedPitchClassDelta (int fromNote, int toNote) noexcept
+    {
+        const int fPc = normalizePitchClass (fromNote);
+        const int tPc = normalizePitchClass (toNote);
+        return (tPc - fPc + 18) % 12 - 6;
+    }
+
+    static bool hasPitchClassInChord (int pc, const ChordEvent& chord) noexcept
+    {
+        const int normPc = normalizePitchClass (pc);
+        for (int existingPc : chord.pitchClasses)
+        {
+            if (existingPc == normPc)
+                return true;
+        }
+        for (int note : chord.midiNotes)
+        {
+            if (normalizePitchClass (note) == normPc)
+                return true;
+        }
+        return false;
+    }
+
+    static bool isTritonePitchClassInChord (int note, const ChordEvent& chord) noexcept
+    {
+        const int pc = normalizePitchClass (note);
+        for (int otherNote : chord.midiNotes)
+        {
+            const int otherPc = normalizePitchClass (otherNote);
+            if (std::abs (pc - otherPc) == 6)
+                return true;
+        }
+        return false;
+    }
+
+    static bool hasDissonanceInChord (int pc, const ChordEvent& chord) noexcept
+    {
+        for (int otherNote : chord.midiNotes)
+        {
+            const int otherPc = normalizePitchClass (otherNote);
+            if (otherPc == pc)
+                continue;
+            const int diff = std::min (std::abs (pc - otherPc), 12 - std::abs (pc - otherPc));
+            if (diff == 1 || diff == 2 || diff == 5 || diff == 6)
+                return true;
+        }
+        return false;
     }
 };
