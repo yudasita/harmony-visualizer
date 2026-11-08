@@ -478,11 +478,23 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
 
             if (!isForeground)
             {
-                if (dist == 6) // トライトーン（最大緊張）: 空気遠近の影響を弱め、霧の奥でも発光を持続
+                if (dist == 6) // トライトーン（最大緊張）: ペアごとに未解決なら空気遠近耐性(0.65)と発光を持続、解決済みなら落ち着かせる
                 {
-                    lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.65f);
-                    lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.5f, z, 0.45f);
-                    aerialResistance = 0.65f;
+                    const bool pairResolved = chord.isTritonePairResolved (idxA, idxB);
+                    if (!pairResolved)
+                    {
+                        lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.65f);
+                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.5f, z, 0.45f);
+                        aerialResistance = 0.65f;
+                    }
+                    else
+                    {
+                        // 既に解決したトライトーンペアは発光を消し、安定音程に近い落ち着いた輝度へ減衰
+                        lineAlpha = effectiveAlpha * 0.72f;
+                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.1f, z, 0.35f);
+                        aerialResistance = 0.15f;
+                    }
+                }
                 }
                 else if (dist == 5) // 半音緊張（短2度/長7度）: 中程度の空気遠近耐性
                 {
