@@ -54,9 +54,10 @@ xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
 
 ---
 
-## 開発について (Development)
+## ドキュメント (Documentation)
 
-このリポジトリにおける開発フロー（Issue / ブランチ / コミット規約）、リアルタイム・オーディオセーフティ設計原則、プロジェクト構成については **[AGENTS.md](AGENTS.md)** を参照してください。
+- **[docs/MUSIC_THEORY.md](docs/MUSIC_THEORY.md)**: 五度圏幾何学モデル、ボイスリーディング引力・コスト関数、および 3D 演出の技術仕様書
+- **[AGENTS.md](AGENTS.md)**: 開発フロー、Issue / ブランチ規約、リアルタイム・オーディオセーフティ設計原則
 
 ---
 
