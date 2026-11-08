@@ -37,7 +37,7 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
     {
         slider.setSliderStyle (juce::Slider::LinearHorizontal);
         slider.setRange (minVal, maxVal, stepVal);
-        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 68, 22);
+        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 22);
         slider.setTextValueSuffix (suffix);
         slider.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff232a3b));
         slider.setColour (juce::Slider::trackColourId, juce::Colour (0xff38bdf8));
@@ -119,7 +119,7 @@ void HarmonyVisualizerAudioProcessorEditor::timerCallback()
     // コード履歴キューのアニメーション更新
     chordHistory.updateAnimation (0.2f);
 
-    // 設定モーダルの表示・非表示アニメーション更新
+    // 設定ドロワーの表示・非表示アニメーション更新
     const float targetModalAlpha = isSettingsModalOpen ? 1.0f : 0.0f;
     if (std::abs (settingsModalAlpha - targetModalAlpha) > 0.004f)
     {
@@ -151,7 +151,7 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     drawVoiceLeadingConnections (g);
     drawForegroundChordLayer (g);
 
-    // 右上の設定アイコン（歯車ボタン）と設定モーダルオーバーレイの描画
+    // 右上の設定アイコン（歯車ボタン）と右端サイドドロワーの描画
     drawSettingsGearButton (g);
     if (settingsModalAlpha > 0.005f)
     {
@@ -673,6 +673,7 @@ void HarmonyVisualizerAudioProcessorEditor::resized()
 {
     drawingArea = getLocalBounds().toFloat().reduced (0.0f);
     
+    // 五度圏の中央配置は常に維持（サイドドロワー表示時もメイン領域のシフトは行わない）
     circleCenter = drawingArea.getCentre();
     circleRadius = juce::jmin (drawingArea.getWidth(), drawingArea.getHeight()) * 0.4f;
     circleDiameter = 2.0f * circleRadius;
@@ -735,18 +736,17 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
     const float w = static_cast<float> (getWidth());
     const float h = static_cast<float> (getHeight());
 
-    const float cardW = juce::jlimit (260.0f, 360.0f, w * 0.84f);
-    const float cardH = juce::jlimit (255.0f, 310.0f, h * 0.78f);
+    // 右端からスライドインするスリムなサイドドロワー（インスペクターパネル）
+    const float drawerW = juce::jlimit (190.0f, 240.0f, w * 0.48f);
+    const float slideOffsetX = (1.0f - settingsModalAlpha) * drawerW;
 
-    // 開閉アニメーション時の微小なスライドイン効果
-    const float slideOffsetY = (1.0f - settingsModalAlpha) * -10.0f;
-    modalCardBounds = juce::Rectangle<float> ((w - cardW) * 0.5f,
-                                              (h - cardH) * 0.5f + slideOffsetY,
-                                              cardW,
-                                              cardH);
+    modalCardBounds = juce::Rectangle<float> (w - drawerW + slideOffsetX,
+                                              0.0f,
+                                              drawerW,
+                                              h);
 
-    modalCloseButtonBounds = juce::Rectangle<float> (modalCardBounds.getRight() - 32.0f,
-                                                     modalCardBounds.getY() + 8.0f,
+    modalCloseButtonBounds = juce::Rectangle<float> (modalCardBounds.getRight() - 36.0f,
+                                                     12.0f,
                                                      24.0f,
                                                      24.0f);
 
@@ -756,7 +756,7 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
     arpeggioThresholdSlider.setVisible (showControls);
     resetSettingsButton.setVisible (showControls);
 
-    historySizeSlider.setInterceptsMouseClicks ( isSettingsModalOpen, isSettingsModalOpen);
+    historySizeSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
     quantizeWindowSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
     arpeggioThresholdSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
     resetSettingsButton.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
@@ -768,34 +768,35 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
         arpeggioThresholdSlider.setAlpha (settingsModalAlpha);
         resetSettingsButton.setAlpha (settingsModalAlpha);
 
-        const int contentX = static_cast<int> (modalCardBounds.getX() + 16.0f);
-        const int contentW = static_cast<int> (modalCardBounds.getWidth() - 32.0f);
-        const int baseTop = static_cast<int> (modalCardBounds.getY() + 48.0f);
-        const int rowStep = 48;
+        const int contentX = static_cast<int> (std::round (modalCardBounds.getX() + 14.0f));
+        const int contentW = static_cast<int> (std::round (modalCardBounds.getWidth() - 28.0f));
+        const int baseTop = static_cast<int> (std::round (modalCardBounds.getY() + 54.0f));
+        const int rowStep = 50;
 
         historySizeSlider.setBounds (contentX, baseTop + 18, contentW, 24);
         quantizeWindowSlider.setBounds (contentX, baseTop + rowStep + 18, contentW, 24);
         arpeggioThresholdSlider.setBounds (contentX, baseTop + rowStep * 2 + 18, contentW, 24);
 
-        const int resetBtnW = 128;
-        const int resetBtnH = 24;
-        const int footerY = static_cast<int> (modalCardBounds.getBottom() - 34.0f);
-        resetSettingsButton.setBounds (static_cast<int> (modalCardBounds.getRight() - 16.0f) - resetBtnW,
-                                       footerY,
-                                       resetBtnW,
-                                       resetBtnH);
+        const int resetBtnH = 26;
+        const int resetBtnY = static_cast<int> (std::round (modalCardBounds.getBottom() - 78.0f));
+        resetSettingsButton.setBounds (contentX, resetBtnY, contentW, resetBtnH);
     }
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawSettingsGearButton (juce::Graphics& g)
 {
-    const float bgAlpha = isSettingsModalOpen ? 0.28f : (isGearButtonHovered ? 0.18f : 0.08f);
+    // ドロワー展開時はヘッダー右上の閉じる（×）ボタンにスムーズにバトンタッチする
+    const float visibilityAlpha = juce::jlimit (0.0f, 1.0f, 1.0f - settingsModalAlpha * 1.4f);
+    if (visibilityAlpha <= 0.01f)
+        return;
+
+    const float bgAlpha = (isGearButtonHovered ? 0.18f : 0.08f) * visibilityAlpha;
     g.setColour (juce::Colours::white.withAlpha (bgAlpha));
     g.fillRoundedRectangle (gearButtonBounds, 6.0f);
 
-    if (isSettingsModalOpen || isGearButtonHovered)
+    if (isGearButtonHovered)
     {
-        g.setColour (juce::Colour (0xff38bdf8).withAlpha (isSettingsModalOpen ? 0.65f : 0.35f));
+        g.setColour (juce::Colour (0xff38bdf8).withAlpha (0.35f * visibilityAlpha));
         g.drawRoundedRectangle (gearButtonBounds, 6.0f, 1.0f);
     }
 
@@ -824,9 +825,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsGearButton (juce::Graphi
     gearPath.closeSubPath();
     gearPath.setUsingNonZeroWinding (false);
 
-    const juce::Colour iconColour = isSettingsModalOpen
-        ? juce::Colour (0xff38bdf8)
-        : (isGearButtonHovered ? juce::Colour (0xfff1f5f9) : inactiveNoteColour.brighter (0.25f));
+    const juce::Colour iconColour = (isGearButtonHovered
+        ? juce::Colour (0xfff1f5f9)
+        : inactiveNoteColour.brighter (0.25f)).withMultipliedAlpha (visibilityAlpha);
     g.setColour (iconColour);
     g.fillPath (gearPath);
 }
@@ -835,28 +836,45 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
 {
     const float a = juce::jlimit (0.0f, 1.0f, settingsModalAlpha);
 
-    // 1. 半透明バックドロップ（背景の五度圏トンネルを暗転）
-    g.setColour (juce::Colour (0xff090b10).withAlpha (0.72f * a));
-    g.fillRect (getLocalBounds());
+    // 1. ドロワー左外側のソフトドロップシャドウ（全画面暗転バックドロップは廃止し、ライブプレビュー性を維持）
+    const float shadowWidth = 24.0f;
+    juce::ColourGradient shadowGrad (
+        juce::Colour (0xff07090e).withAlpha (0.0f),  modalCardBounds.getX() - shadowWidth, 0.0f,
+        juce::Colour (0xff07090e).withAlpha (0.48f * a), modalCardBounds.getX(), 0.0f,
+        false);
+    g.setGradientFill (shadowGrad);
+    g.fillRect (modalCardBounds.getX() - shadowWidth,
+                modalCardBounds.getY(),
+                shadowWidth,
+                modalCardBounds.getHeight());
 
-    // 2. モーダルカード本体（Dark Slate サーフェス）
-    g.setColour (juce::Colour (0xff181d2a).withAlpha (0.96f * a));
-    g.fillRoundedRectangle (modalCardBounds, 12.0f);
+    // 2. 右端サイドドロワー本体（半透明 Dark Slate ガラス調サーフェス）
+    g.setColour (juce::Colour (0xff161b28).withAlpha (0.86f * a));
+    g.fillRect (modalCardBounds);
 
-    g.setColour (juce::Colour (0xff334155).withAlpha (0.85f * a));
-    g.drawRoundedRectangle (modalCardBounds, 12.0f, 1.2f);
+    // 左端の境界線（ボーダー）と微かなインナーハイライト
+    g.setColour (juce::Colour (0xff334155).withAlpha (0.88f * a));
+    g.drawLine (modalCardBounds.getX(), modalCardBounds.getY(),
+                modalCardBounds.getX(), modalCardBounds.getBottom(), 1.2f);
+
+    g.setColour (juce::Colour (0xff38bdf8).withAlpha (0.14f * a));
+    g.drawLine (modalCardBounds.getX() + 1.0f, modalCardBounds.getY(),
+                modalCardBounds.getX() + 1.0f, modalCardBounds.getBottom(), 1.0f);
 
     // 3. ヘッダータイトルと閉じるボタン（×）
-    const juce::Rectangle<float> headerArea (modalCardBounds.getX() + 16.0f,
-                                             modalCardBounds.getY() + 8.0f,
-                                             modalCardBounds.getWidth() - 52.0f,
+    const float contentX = modalCardBounds.getX() + 14.0f;
+    const float contentW = modalCardBounds.getWidth() - 28.0f;
+
+    const juce::Rectangle<float> headerArea (contentX,
+                                             modalCardBounds.getY() + 11.0f,
+                                             contentW - 28.0f,
                                              26.0f);
     g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
     g.setColour (juce::Colour (0xfff1f5f9).withAlpha (a));
     g.drawText ("Settings", headerArea, juce::Justification::centredLeft, false);
 
     // ヘッダー区切り線
-    const float headerLineY = modalCardBounds.getY() + 38.0f;
+    const float headerLineY = modalCardBounds.getY() + 44.0f;
     g.setColour (juce::Colour (0xff2a3245).withAlpha (a));
     g.drawHorizontalLine (static_cast<int> (headerLineY),
                           modalCardBounds.getX() + 12.0f,
@@ -865,7 +883,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
     // 閉じる（×）ボタン
     if (isCloseButtonHovered)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.12f * a));
+        g.setColour (juce::Colours::white.withAlpha (0.14f * a));
         g.fillRoundedRectangle (modalCloseButtonBounds, 5.0f);
     }
     g.setColour ((isCloseButtonHovered ? juce::Colour (0xfff8fafc) : juce::Colour (0xff94a3b8)).withAlpha (a));
@@ -877,12 +895,10 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
                 closeCenter.x - crossHalf, closeCenter.y + crossHalf, 1.6f);
 
     // 4. 各スライダー項目のラベル
-    const float contentX = modalCardBounds.getX() + 16.0f;
-    const float contentW = modalCardBounds.getWidth() - 32.0f;
-    const float baseTop = modalCardBounds.getY() + 46.0f;
-    const float rowStep = 48.0f;
+    const float baseTop = modalCardBounds.getY() + 54.0f;
+    const float rowStep = 50.0f;
 
-    g.setFont (juce::FontOptions (12.0f));
+    g.setFont (juce::FontOptions (11.5f));
     g.setColour (juce::Colour (0xffcbd5e1).withAlpha (a));
     g.drawText ("History Generations",
                 juce::Rectangle<float> (contentX, baseTop, contentW, 18.0f),
@@ -897,7 +913,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
                 juce::Justification::centredLeft, false);
 
     // 5. フッター区切り線 ＆ About（バージョン・ビルド情報）表示
-    const float footerLineY = modalCardBounds.getBottom() - 42.0f;
+    const float footerLineY = modalCardBounds.getBottom() - 44.0f;
     g.setColour (juce::Colour (0xff2a3245).withAlpha (a));
     g.drawHorizontalLine (static_cast<int> (footerLineY),
                           modalCardBounds.getX() + 12.0f,
@@ -905,9 +921,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
 
     const juce::Rectangle<float> aboutBounds (contentX,
                                               modalCardBounds.getBottom() - 36.0f,
-                                              contentW - 124.0f,
+                                              contentW,
                                               28.0f);
-    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
     g.setColour (juce::Colour (0xff94a3b8).withAlpha (a));
     const juce::String versionTitle = "HarmonyVisualizer v" + juce::String (ProjectInfo::versionString);
     g.drawText (versionTitle, aboutBounds.withHeight (14.0f), juce::Justification::centredLeft, false);
@@ -926,27 +942,26 @@ void HarmonyVisualizerAudioProcessorEditor::mouseDown (const juce::MouseEvent& e
 {
     const juce::Point<float> pos = event.position;
 
-    if (gearButtonBounds.contains (pos))
-    {
-        setSettingsModalOpen (!isSettingsModalOpen);
-        return;
-    }
-
     if (isSettingsModalOpen)
     {
-        if (modalCloseButtonBounds.contains (pos) || !modalCardBounds.contains (pos))
+        if (modalCloseButtonBounds.contains (pos) || gearButtonBounds.contains (pos) || !modalCardBounds.contains (pos))
         {
             setSettingsModalOpen (false);
             return;
         }
+    }
+    else if (gearButtonBounds.contains (pos))
+    {
+        setSettingsModalOpen (true);
+        return;
     }
 }
 
 void HarmonyVisualizerAudioProcessorEditor::mouseMove (const juce::MouseEvent& event)
 {
     const juce::Point<float> pos = event.position;
-    const bool newGearHover = gearButtonBounds.contains (pos);
-    const bool newCloseHover = isSettingsModalOpen && modalCloseButtonBounds.contains (pos);
+    const bool newGearHover = !isSettingsModalOpen && gearButtonBounds.contains (pos);
+    const bool newCloseHover = isSettingsModalOpen && (modalCloseButtonBounds.contains (pos) || gearButtonBounds.contains (pos));
 
     if (newGearHover != isGearButtonHovered || newCloseHover != isCloseButtonHovered)
     {

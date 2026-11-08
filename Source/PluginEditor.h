@@ -74,7 +74,7 @@ public:
         const float baseFog = 1.0f - std::exp (-2.2f * normalizedZ);
         const float clampedResistance = juce::jlimit (0.0f, 0.85f, resistance);
 
-                return juce::jlimit (0.0f, 0.88f, baseFog * (1.0f - clampedResistance));
+        return juce::jlimit (0.0f, 0.88f, baseFog * (1.0f - clampedResistance));
     }
 
     /**
@@ -144,7 +144,7 @@ private:
     void drawForegroundChordLayer (juce::Graphics& g);
     void drawChordRingAndPolygon (juce::Graphics& g, const ChordEvent& chord, float effectiveAlpha, bool isForeground);
 
-    // 設定パネル（右上歯車アイコン＆半透明オーバーレイモーダル）描画・制御ヘルパー
+    // 設定パネル（右上歯車アイコン＆右端半透明サイドドロワー）描画・制御ヘルパー
     void drawSettingsGearButton (juce::Graphics& g);
     void drawSettingsModalOverlay (juce::Graphics& g);
     void updateSettingsModalLayout();
