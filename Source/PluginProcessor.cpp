@@ -223,14 +223,75 @@ juce::AudioProcessorEditor* HarmonyVisualizerAudioProcessor::createEditor()
 }
 
 //==============================================================================
+int HarmonyVisualizerAudioProcessor::getMaxHistorySize() const noexcept
+{
+    const int val = static_cast<int> (settingsState.getProperty ("maxHistorySize", defaultMaxHistorySize));
+    return juce::jlimit (2, 16, val);
+}
+
+void HarmonyVisualizerAudioProcessor::setMaxHistorySize (int size)
+{
+    const int clamped = juce::jlimit (2, 16, size);
+    settingsState.setProperty ("maxHistorySize", clamped, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+double HarmonyVisualizerAudioProcessor::getQuantizeWindowMs() const noexcept
+{
+    const double val = static_cast<double> (settingsState.getProperty ("quantizeWindowMs", defaultQuantizeWindowMs));
+    return juce::jlimit (15.0, 200.0, val);
+}
+
+void HarmonyVisualizerAudioProcessor::setQuantizeWindowMs (double ms)
+{
+    const double clamped = juce::jlimit (15.0, 200.0, ms);
+    settingsState.setProperty ("quantizeWindowMs", clamped, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+double HarmonyVisualizerAudioProcessor::getArpeggioThresholdMs() const noexcept
+{
+    const double val = static_cast<double> (settingsState.getProperty ("arpeggioThresholdMs", defaultArpeggioThresholdMs));
+    return juce::jlimit (100.0, 1200.0, val);
+}
+
+void HarmonyVisualizerAudioProcessor::setArpeggioThresholdMs (double ms)
+{
+    const double clamped = juce::jlimit (100.0, 1200.0, ms);
+    settingsState.setProperty ("arpeggioThresholdMs", clamped, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void HarmonyVisualizerAudioProcessor::resetSettingsToDefaults()
+{
+    settingsState.setProperty ("maxHistorySize", defaultMaxHistorySize, nullptr);
+    settingsState.setProperty ("quantizeWindowMs", defaultQuantizeWindowMs, nullptr);
+    settingsState.setProperty ("arpeggioThresholdMs", defaultArpeggioThresholdMs, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+//==============================================================================
 void HarmonyVisualizerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ignoreUnused (destData);
+    if (auto xml = settingsState.createXml())
+        copyXmlToBinary (*xml, destData);
 }
 
 void HarmonyVisualizerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    juce::ignoreUnused (data, sizeInBytes);
+    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    {
+        if (xml->hasTagName (settingsState.getType()))
+        {
+            auto restored = juce::ValueTree::fromXml (*xml);
+            if (restored.isValid())
+            {
+                setMaxHistorySize (static_cast<int> (restored.getProperty ("maxHistorySize", defaultMaxHistorySize)));
+                setQuantizeWindowMs (static_cast<double> (restored.getProperty ("quantizeWindowMs", defaultQuantizeWindowMs)));
+                setArpeggioThresholdMs (static_cast<double> (restored.getProperty ("arpeggioThresholdMs", defaultArpeggioThresholdMs)));
+            }
+        }
+    }
 }
 
 //==============================================================================

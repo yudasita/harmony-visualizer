@@ -30,7 +30,11 @@ public:
 
     //==============================================================================
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent& event) override;
+    void mouseMove (const juce::MouseEvent& event) override;
+    void mouseExit (const juce::MouseEvent& event) override;
     
     void timerCallback() override;
 
@@ -139,6 +143,28 @@ private:
                                        bool isLatestTransition);
     void drawForegroundChordLayer (juce::Graphics& g);
     void drawChordRingAndPolygon (juce::Graphics& g, const ChordEvent& chord, float effectiveAlpha, bool isForeground);
+
+    // 設定パネル（右上歯車アイコン＆半透明オーバーレイモーダル）描画・制御ヘルパー
+    void drawSettingsGearButton (juce::Graphics& g);
+    void drawSettingsModalOverlay (juce::Graphics& g);
+    void updateSettingsModalLayout();
+    void syncSettingsFromProcessor();
+    void setSettingsModalOpen (bool shouldOpen);
+
+    bool isSettingsModalOpen { false };
+    bool isGearButtonHovered { false };
+    bool isCloseButtonHovered { false };
+    float settingsModalAlpha { 0.0f };
+    uint32_t lastSyncedSettingsRevision { 0 };
+
+    juce::Rectangle<float> gearButtonBounds;
+    juce::Rectangle<float> modalCardBounds;
+    juce::Rectangle<float> modalCloseButtonBounds;
+
+    juce::Slider historySizeSlider;
+    juce::Slider quantizeWindowSlider;
+    juce::Slider arpeggioThresholdSlider;
+    juce::TextButton resetSettingsButton { "Reset to Defaults" };
 
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;
