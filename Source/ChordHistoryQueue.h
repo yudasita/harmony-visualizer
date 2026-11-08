@@ -68,11 +68,10 @@ public:
 
             if (existing.hasUnresolvedTritone())
             {
-                // 1. 和声学的な順次解決（協和解決）のチェック
-                // 2. または新コード自身が新たなトライトーンを持つ場合（ツーファイブ進行や転調等での交代上書き）
-                if (existing.checkResolutionAgainst (chord) || chord.hasTritone())
+                // 各トライトーンペアごとに個別に解決（または新トライトーンへの交代）を判定・更新し、
+                // すべてのペアが解決完了した時点で resolvedAtGeneration を記録する
+                if (existing.updatePairResolutionsAgainst (chord))
                 {
-                    existing.tritoneResolved = true;
                     existing.resolvedAtGeneration = existing.generation;
                 }
             }
@@ -83,6 +82,7 @@ public:
         chord.zPosition = 0.0f;
         chord.targetZ = 0.0f;
         chord.alpha = 1.0f;
+        chord.tritonePairResolved.assign (chord.tritonePairs.size(), false);
         chord.tritoneResolved = !chord.hasTritone();
         chord.resolvedAtGeneration = -1;
         chord.isRetiring = false;
@@ -113,18 +113,18 @@ public:
         front.targetZ = targetZ;
         front.alpha = alpha;
         front.generation = gen;
+        front.tritonePairResolved.assign (front.tritonePairs.size(), false);
         front.tritoneResolved = !front.hasTritone();
         front.isRetiring = false;
 
-        // 最新コードの構成音更新に伴い、過去の未解決トライトーンが解決されたかも再チェック
+        // 最新コードの構成音更新に伴い、過去の未解決トライトーンペアが解決されたかも個別に再チェック
         for (size_t i = 1; i < history.size(); ++i)
         {
             auto& past = history[i];
             if (past.hasUnresolvedTritone())
             {
-                if (past.checkResolutionAgainst (front) || front.hasTritone())
+                if (past.updatePairResolutionsAgainst (front))
                 {
-                    past.tritoneResolved = true;
                     past.resolvedAtGeneration = past.generation;
                 }
             }

@@ -30,6 +30,7 @@ struct ChordEvent
     int bassCircleIndex { -1 };                     // 最低音の五度圏インデックス
 
     std::vector<std::pair<int, int>> tritonePairs;  // トライトーン（半音6離れた音）の五度圏インデックスペア
+    std::vector<bool> tritonePairResolved;          // 各トライトーンペアごとの個別解決状態フラグ
 
     float zPosition { 0.0f };                       // 現在の描画Z位置（0.0f = 最前面）
     float targetZ { 0.0f };                         // 遷移先目標Z位置
@@ -37,8 +38,8 @@ struct ChordEvent
     int generation { 0 };                           // 世代番号（0 = 最新のコード, 1, 2... = 過去コード）
 
     // トライトーン解決追跡・ライフサイクル管理用フラグ
-    bool tritoneResolved { true };                  // トライトーンを含まないか、後続コードで解決完了した場合に true
-    int resolvedAtGeneration { -1 };                // 解決が完了した時点の世代番号（余韻保持用）
+    bool tritoneResolved { true };                  // トライトーンを含まないか、全ペアが解決完了した場合に true
+    int resolvedAtGeneration { -1 };                // 全ペアの解決が完了した時点の世代番号（余韻保持用）
     bool isRetiring { false };                      // 規定世代を超えフェードアウト消滅中かどうか
 
     bool isEmpty() const noexcept
@@ -160,16 +161,80 @@ struct ChordEvent
     }
 
     /**
-        このコードが持つすべてのトライトーンが subsequentChord によって解決されたかを判定する
+        指定した五度圏インデックスのトライトーンペア (idxA, idxB) が既に解決済みかを返す
+    */
+    bool isTritonePairResolved (int idxA, int idxB) const noexcept
+    {
+        const int first = std::min (idxA, idxB);
+        const int second = std::max (idxA, idxB);
+        for (size_t k = 0; k < tritonePairs.size(); ++k)
+        {
+            const int pFirst = std::min (tritonePairs[k].first, tritonePairs[k].second);
+            const int pSecond = std::max (tritonePairs[k].first, tritonePairs[k].second);
+            if (pFirst == first && pSecond == second)
+            {
+                return (k < tritonePairResolved.size()) ? tritonePairResolved[k] : tritoneResolved;
+            }
+        }
+        return true;
+    }
+
+    /**
+        後続コード subsequentChord に対して未解決のトライトーンペアを個別に判定・更新し、
+        すべてのペアが解決完了したかどうかを返す。
+        - dim7 のように2組のトライトーンを持つ場合、片方だけ解決した段階ではそのペアのみ解決済みとなり、
+          もう片方が解決されるまでコード自体は保持される。
+        - また、後続コードが新たな（別ペアの）トライトーンを持つ場合は緊張の交代（上書き）として解決扱いにする。
+    */
+    bool updatePairResolutionsAgainst (const ChordEvent& subsequentChord) noexcept
+    {
+        if (tritonePairs.empty())
+        {
+            tritoneResolved = true;
+            return true;
+        }
+
+        if (tritonePairResolved.size() != tritonePairs.size())
+            tritonePairResolved.assign (tritonePairs.size(), false);
+
+        bool allResolved = true;
+        for (size_t k = 0; k < tritonePairs.size(); ++k)
+        {
+            if (!tritonePairResolved[k])
+            {
+                const auto& pair = tritonePairs[k];
+                const bool samePairRemains = subsequentChord.hasCircleIndex (pair.first)
+                                          && subsequentChord.hasCircleIndex (pair.second);
+
+                // 1. このペア自身が和声学的に順次解決した場合
+                // 2. または、このペアは残っておらず後続コードに新しい別のトライトーンが出現した場合（緊張の交代上書き）
+                if (isTritonePairResolvedBy (pair, subsequentChord)
+                    || (!samePairRemains && subsequentChord.hasTritone()))
+                {
+                    tritonePairResolved[k] = true;
+                }
+            }
+
+            if (!tritonePairResolved[k])
+                allResolved = false;
+        }
+
+        tritoneResolved = allResolved;
+        return allResolved;
+    }
+
+    /**
+        このコードが持つすべてのトライトーンが subsequentChord によって解決されるかを判定する（const版）
     */
     bool checkResolutionAgainst (const ChordEvent& subsequentChord) const noexcept
     {
         if (tritonePairs.empty())
             return true;
 
-        for (const auto& pair : tritonePairs)
+        for (size_t k = 0; k < tritonePairs.size(); ++k)
         {
-            if (!isTritonePairResolvedBy (pair, subsequentChord))
+            const bool already = (k < tritonePairResolved.size()) ? tritonePairResolved[k] : false;
+            if (!already && !isTritonePairResolvedBy (tritonePairs[k], subsequentChord))
                 return false;
         }
         return true;
@@ -227,6 +292,7 @@ struct ChordEvent
             }
         }
 
+        chord.tritonePairResolved.assign (chord.tritonePairs.size(), false);
         chord.tritoneResolved = chord.tritonePairs.empty();
         return chord;
     }
