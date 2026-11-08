@@ -193,6 +193,14 @@ public:
         }
     }
 
+    /** リペダリング猶予時間窓（ms）を設定する */
+    void setRepedalWindowMs (double windowMs) noexcept
+    {
+        repedalWindowMs = juce::jlimit (50.0, 500.0, windowMs);
+    }
+
+    double getRepedalWindowMs() const noexcept { return repedalWindowMs; }
+
     /** タイマー駆動等の周期呼び出しでクオンタイズ窓の満了を判定する */
     void update (double currentTimeMs)
     {
@@ -215,8 +223,27 @@ public:
             }
         }
 
-        // 離鍵状態（現在押鍵数0、かつペダルOFF）の判定
-        if (currentlyHeldNotes.empty() && !isPedalDown)
+        // リペダリング猶予時間（仮想サスティン）の満了判定
+        if (isInRepedalWindow && (currentTimeMs - repedalWindowStartTimeMs >= repedalWindowMs))
+        {
+            isInRepedalWindow = false;
+            repedalNotes.clear();
+            refreshSoundingNotes();
+
+            if (currentlyHeldNotes.empty() && !isPedalDown)
+            {
+                hasActiveCommittedChord = false;
+                isBuildingInitialChord = false;
+                if (!currentState.notes.empty())
+                {
+                    currentState.isDimmed = true;
+                }
+            }
+        }
+
+        // 離鍵状態（現在押鍵数0、ペダルOFF、かつリペダリング仮想サスティン保持なし）の判定
+        const bool hasVirtualSustain = isInRepedalWindow && !repedalNotes.empty();
+        if (currentlyHeldNotes.empty() && !isPedalDown && !hasVirtualSustain)
         {
             if (!currentState.notes.empty())
             {
@@ -253,11 +280,16 @@ public:
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
         sustainedNotes.clear();
+        repedalNotes.clear();
+        staleHeldNotes.clear();
+        committedHeldNotes.clear();
         notesInCurrentWindow.clear();
         isCc64Down = false;
         isPitchBendPedalDown = false;
         isPedalDown = false;
         pedalReleasedSinceLastChord = false;
+        isInRepedalWindow = false;
+        repedalWindowStartTimeMs = -9999.0;
         isWindowOpen = false;
         windowStartTimeMs = 0.0;
         lastCommitTimeMs = -9999.0;
@@ -280,6 +312,9 @@ private:
     double arpeggioThresholdMs { 450.0 };    // アルペジオ許容時間窓(ms)
     double melodyStepThresholdMs { 1500.0 };  // メロディ経過音ステップ判定許容時間窓(ms)
     double appoggiaturaResolutionWindowMs { 1000.0 }; // 倚音・掛留音の離鍵解決許容時間窓(ms)
+    double repedalWindowMs { 150.0 };        // リペダリング時の新規打鍵ノート仮想サスティン猶予時間(ms)
+    double repedalWindowStartTimeMs { -9999.0 };
+    bool isInRepedalWindow { false };
 
     double lastNoteOnTimeMs { -9999.0 };     // 直前の打鍵時刻
     int lastTopNote { -1 };                  // 直前のメロディ最高音（トップノート）
@@ -297,6 +332,9 @@ private:
     std::set<int> currentlyHeldNotes;
     std::set<int> accumulatedNotes;
     std::set<int> sustainedNotes;
+    std::set<int> repedalNotes;              // ペダルOFF後の踏み直し猶予中に新規打鍵された仮想サスティン音
+    std::set<int> staleHeldNotes;            // ペダルOFF前から押しっぱなしの直前コード由来ノート（次コード混入防止用）
+    std::set<int> committedHeldNotes;        // 直前のコード確定時点から継続して押鍵されているノート
     std::vector<int> notesInCurrentWindow;   // 現在のクオンタイズ窓内に新規打鍵された音
 
     ChordState currentState;
@@ -312,6 +350,10 @@ private:
         if (isPedalDown)
         {
             combined.insert (sustainedNotes.begin(), sustainedNotes.end());
+        }
+        else if (isInRepedalWindow)
+        {
+            combined.insert (repedalNotes.begin(), repedalNotes.end());
         }
         currentState.soundingNotes.assign (combined.begin(), combined.end());
     }
@@ -330,9 +372,27 @@ private:
         const double elapsedSinceLastNote = (lastNoteOnTimeMs > 0.0) ? (currentTimeMs - lastNoteOnTimeMs) : 99999.0;
         lastNoteOnTimeMs = currentTimeMs;
 
+        if (isInRepedalWindow && (currentTimeMs - repedalWindowStartTimeMs > repedalWindowMs))
+        {
+            isInRepedalWindow = false;
+            repedalNotes.clear();
+        }
+
+        // 新規に打鍵されたノートは過去の押しっぱなし除外対象から解除
+        staleHeldNotes.erase (noteNumber);
+        committedHeldNotes.erase (noteNumber);
+
         currentlyHeldNotes.insert (noteNumber);
         if (isPedalDown)
+        {
             sustainedNotes.insert (noteNumber);
+        }
+        else if (isInRepedalWindow)
+        {
+            // ペダルOFF後の踏み直し猶予期間中に打鍵されたノートを仮想サスティン保持
+            repedalNotes.insert (noteNumber);
+            repedalWindowStartTimeMs = currentTimeMs;
+        }
 
         // アルペジオ継続（同一コードの蓄積・成長）かどうかの判定:
         // 1. ペダルが踏まれている場合:
@@ -340,8 +400,8 @@ private:
         //    かつ直前の打鍵から arpeggioThresholdMs 以内である場合のみ継続とする。
         //    （ペダルを踏み続けたままの反復打鍵・ジャンジャン演奏が誤ってアルペジオ継続されるのを防止）
         // 2. ペダルが踏まれていない場合:
-        //    直前からの押鍵が残っている（レガート/和音押さえ）、または arpeggioThresholdMs 以内の打鍵であること
-        // 3. かつ、ペダル解放（踏み直し）直後ではなく、演奏待機状態（dimmed）でもない
+        //    直前からの新規押鍵またはリペダリング仮想サスティン保持音が残っている、または arpeggioThresholdMs 以内の打鍵であること
+        // 3. かつ、ペダル解放（踏み直し）直後の初回打鍵ではなく、演奏待機状態（dimmed）でもない
         bool isArpeggioContinuation = false;
         if (!currentState.isDimmed && !pedalReleasedSinceLastChord)
         {
@@ -354,7 +414,16 @@ private:
             }
             else
             {
-                const bool isLegatoOrArpeggio = (currentlyHeldNotes.size() > 1) || (elapsedSinceLastNote <= arpeggioThresholdMs);
+                size_t activeFreshHeldCount = 0;
+                for (int n : currentlyHeldNotes)
+                {
+                    if (staleHeldNotes.find (n) == staleHeldNotes.end())
+                        ++activeFreshHeldCount;
+                }
+                const bool hasRepedalHeld = isInRepedalWindow && (repedalNotes.size() > 1);
+                const bool isLegatoOrArpeggio = (activeFreshHeldCount > 1)
+                                             || hasRepedalHeld
+                                             || (elapsedSinceLastNote <= arpeggioThresholdMs);
                 if (isLegatoOrArpeggio)
                 {
                     isArpeggioContinuation = true;
@@ -364,18 +433,35 @@ private:
 
         if (!isArpeggioContinuation)
         {
-            // 新規コードの開始：過去の古い蓄積をクリアし、現在押さえている音から再蓄積
-            accumulatedNotes = currentlyHeldNotes;
-            pedalReleasedSinceLastChord = false;
-            if (!hasActiveCommittedChord)
+            // 新規コードの開始：ペダルOFF前から押しっぱなしだった古いノート（staleHeldNotes）を除外し、
+            // 新しく打鍵されたノートおよびリペダリング仮想保持ノートのみから再蓄積
+            accumulatedNotes.clear();
+            for (int n : currentlyHeldNotes)
             {
+                if (staleHeldNotes.find (n) == staleHeldNotes.end())
+                    accumulatedNotes.insert (n);
+            }
+            if (isInRepedalWindow)
+            {
+                accumulatedNotes.insert (repedalNotes.begin(), repedalNotes.end());
+            }
+            accumulatedNotes.insert (noteNumber);
+
+            if (pedalReleasedSinceLastChord || !hasActiveCommittedChord)
+            {
+                hasActiveCommittedChord = false;
                 isBuildingInitialChord = true;
             }
+            pedalReleasedSinceLastChord = false;
             isNewChordStrike = true;
         }
         else
         {
-            // アルペジオ継続：既存の蓄積に新しい音を追加
+            // アルペジオ継続：既存の蓄積に新しい音（およびリペダリング保持音）を追加
+            if (isInRepedalWindow)
+            {
+                accumulatedNotes.insert (repedalNotes.begin(), repedalNotes.end());
+            }
             accumulatedNotes.insert (noteNumber);
         }
 
@@ -395,6 +481,8 @@ private:
     void handleNoteOff (int noteNumber, double currentTimeMs)
     {
         currentlyHeldNotes.erase (noteNumber);
+        staleHeldNotes.erase (noteNumber);
+        committedHeldNotes.erase (noteNumber);
         refreshSoundingNotes();
 
         // コード安定度に基づく後追い解決（倚音・掛留音の離鍵による収束）:
@@ -445,8 +533,9 @@ private:
 
         // 指が1本ずつ離れるミリ秒単位のズレで構成音を削ってしまわないよう、
         // 直前の確定コード（currentState.notes）はそのまま維持する。
-        // 全鍵盤が離鍵され、ペダルもOFFになったら直ちに待機状態（dimmed）へ移行する。
-        if (currentlyHeldNotes.empty() && !isPedalDown && !currentState.notes.empty())
+        // 全鍵盤が離鍵され、ペダルもOFFかつリペダリング仮想サスティン保持もなければ待機状態（dimmed）へ移行する。
+        const bool hasVirtualSustain = isInRepedalWindow && !repedalNotes.empty();
+        if (currentlyHeldNotes.empty() && !isPedalDown && !hasVirtualSustain && !currentState.notes.empty())
         {
             currentState.isDimmed = true;
         }
@@ -454,40 +543,17 @@ private:
 
     void handlePedalChange (bool down, double currentTimeMs)
     {
-        juce::ignoreUnused (currentTimeMs);
-
         if (!isPedalDown && down)
         {
-            // ペダルが踏まれた（ON）：現在押している鍵盤をサスティン対象に追加
+            // ペダルが踏まれた（ON）：現在押している鍵盤、およびリペダリング猶予中に打鍵された仮想保持音を正式なサスティン対象に引き継ぐ
             sustainedNotes = currentlyHeldNotes;
-            isInitialArpeggioForPedalAllowed = true;
-
-            // ペダル踏み込み時：鍵盤上で新しい和音が押さえられていれば、それを新コードとして確定・送出
-            if (!currentlyHeldNotes.empty())
+            if (isInRepedalWindow)
             {
-                std::vector<int> heldNotesVec (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
-                std::set<int> heldPitchClasses;
-                for (int n : heldNotesVec)
-                    heldPitchClasses.insert (((n % 12) + 12) % 12);
-
-                if (heldPitchClasses.size() >= static_cast<size_t> (minNotesForChord))
-                {
-                    if (heldNotesVec != currentState.notes)
-                    {
-                        currentState.notes = heldNotesVec;
-                        currentState.isChordCommitted = true;
-                        currentState.isDimmed = false;
-                        hasActiveCommittedChord = true;
-                        isBuildingInitialChord = false;
-                        isInitialArpeggioForPedalAllowed = false;
-                        lastCommitTimeMs = currentTimeMs;
-                        accumulatedNotes = currentlyHeldNotes;
-
-                        if (onNewChord)
-                            onNewChord (currentState.notes);
-                    }
-                }
+                sustainedNotes.insert (repedalNotes.begin(), repedalNotes.end());
+                isInRepedalWindow = false;
+                repedalNotes.clear();
             }
+            isInitialArpeggioForPedalAllowed = true;
         }
         else if (isPedalDown && !down)
         {
@@ -496,37 +562,68 @@ private:
             pedalReleasedSinceLastChord = true;
             sustainedNotes.clear();
 
-            // 鍵盤も押されていなければ、直ちにdimmed待機状態へ
-            if (currentlyHeldNotes.empty() && !currentState.notes.empty())
+            // リペダリング猶予期間（仮想サスティン窓）を開始
+            isInRepedalWindow = true;
+            repedalWindowStartTimeMs = currentTimeMs;
+            repedalNotes.clear();
+
+            // 直前のコード確定時点から押しっぱなしになっている古いノートを除外対象（staleHeldNotes）として記録し、
+            // ペダルOFF直前に新しく打鍵されたノート（後踏みペダル用の新和音など）のみを抽出する
+            staleHeldNotes = committedHeldNotes;
+            std::vector<int> newlyHeldNotes;
+            for (int n : currentlyHeldNotes)
             {
-                currentState.isDimmed = true;
-                hasActiveCommittedChord = false;
+                if (staleHeldNotes.find (n) == staleHeldNotes.end())
+                    newlyHeldNotes.push_back (n);
             }
-            else if (!currentlyHeldNotes.empty())
+
+            if (currentlyHeldNotes.empty())
             {
-                // 鍵盤が押されている音だけを残す
-                accumulatedNotes = currentlyHeldNotes;
-
-                std::vector<int> heldNotesVec (currentlyHeldNotes.begin(), currentlyHeldNotes.end());
-
-                // 最低音数（2音以上）を満たしている場合
-                std::set<int> heldPitchClasses;
-                for (int n : heldNotesVec)
-                    heldPitchClasses.insert (((n % 12) + 12) % 12);
-
-                if (heldPitchClasses.size() >= static_cast<size_t> (minNotesForChord))
+                accumulatedNotes.clear();
+                if (!currentState.notes.empty())
                 {
-                    // 後踏みペダル等で次のコードを押さえた状態でペダルをOFFにした場合：
-                    // 直前のコードと異なっていれば、これを次のコードとして確定し奥へ送出
-                    if (heldNotesVec != currentState.notes)
+                    currentState.isDimmed = true;
+                    hasActiveCommittedChord = false;
+                }
+            }
+            else if (newlyHeldNotes.empty())
+            {
+                // 現在押鍵されているノートがすべて直前コードから押しっぱなしの古いノート（または同一コード）である場合：
+                // 重複コミット（onNewChord）を抑止し、古いノートが次コードに混ざらないよう蓄積をリセットする
+                accumulatedNotes.clear();
+            }
+            else
+            {
+                // 後踏みペダル等で、直前コード確定後に新しく打鍵されたノートが押さえられている場合：
+                // 踏み直し中の一時的な離鍵でも音が欠けないよう仮想サスティン（repedalNotes）へ保持
+                accumulatedNotes.clear();
+                for (int n : newlyHeldNotes)
+                {
+                    accumulatedNotes.insert (n);
+                    repedalNotes.insert (n);
+                }
+
+                if (isWindowOpen)
+                {
+                    // 打鍵のクオンタイズ窓が開いている最中であれば、クオンタイズ窓の満了に確定を委ねる
+                    hasActiveCommittedChord = false;
+                    pedalReleasedSinceLastChord = false;
+                }
+                else if (newlyHeldNotes.size() >= static_cast<size_t> (minNotesForChord))
+                {
+                    // ペダル踏下中に既にクオンタイズ窓を過ぎて保持されていた新規和音であれば、
+                    // 直前の確定コードと異なる場合のみここで新コードとして確定する
+                    if (newlyHeldNotes != currentState.notes)
                     {
-                        currentState.notes = heldNotesVec;
+                        currentState.notes = newlyHeldNotes;
                         currentState.isChordCommitted = true;
                         currentState.isDimmed = false;
                         hasActiveCommittedChord = true;
                         isBuildingInitialChord = false;
                         isInitialArpeggioForPedalAllowed = false;
+                        pedalReleasedSinceLastChord = false;
                         lastCommitTimeMs = currentTimeMs;
+                        committedHeldNotes = currentlyHeldNotes;
 
                         if (onNewChord)
                             onNewChord (currentState.notes);
@@ -534,9 +631,10 @@ private:
                 }
                 else
                 {
-                    // 鍵盤を押しているがコード最低音数に満たない場合（アルペジオ開始など）
+                    // 新規押鍵音がまだ最低音数に満たない場合（アルペジオ開始など）
                     hasActiveCommittedChord = false;
                     isBuildingInitialChord = true;
+                    pedalReleasedSinceLastChord = false;
                 }
             }
         }
@@ -551,7 +649,11 @@ private:
         currentlyHeldNotes.clear();
         accumulatedNotes.clear();
         sustainedNotes.clear();
+        repedalNotes.clear();
+        staleHeldNotes.clear();
+        committedHeldNotes.clear();
         notesInCurrentWindow.clear();
+        isInRepedalWindow = false;
         isWindowOpen = false;
         hasActiveCommittedChord = false;
         isBuildingInitialChord = false;
@@ -685,6 +787,7 @@ private:
                         // 安定度が向上 -> 不安定音（倚音・テンション）が安定コードトーンへ解決！
                         currentState.notes = candidateNotes;
                         accumulatedNotes = std::set<int> (candidateNotes.begin(), candidateNotes.end());
+                        committedHeldNotes = currentlyHeldNotes;
                         currentState.isDimmed = false;
                         currentState.isChordCommitted = true;
                         lastCommitTimeMs = currentTimeMs;
@@ -761,6 +864,7 @@ private:
         }
 
         currentState.notes = newNotes;
+        committedHeldNotes = currentlyHeldNotes;
         currentState.isDimmed = false;
         currentState.isChordCommitted = true;
         lastCommitTimeMs = currentTimeMs;
