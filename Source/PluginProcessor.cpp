@@ -102,11 +102,15 @@ void HarmonyVisualizerAudioProcessor::prepareToPlay (double sampleRate, int samp
 
 void HarmonyVisualizerAudioProcessor::releaseResources()
 {
+    reset();
 }
 
 void HarmonyVisualizerAudioProcessor::reset()
 {
     midiFifo.reset();
+    QueuedMidiEvent event;
+    event.type = QueuedMidiEvent::Type::allNotesOff;
+    pushMidiEvent (event);
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -175,12 +179,26 @@ void HarmonyVisualizerAudioProcessor::processBlock (juce::AudioBuffer<float>& bu
             event.value = static_cast<uint8_t> (message.getVelocity());
             pushMidiEvent (event);
         }
+        else if (message.isAllNotesOff() || message.isAllSoundOff())
+        {
+            event.type = QueuedMidiEvent::Type::allNotesOff;
+            pushMidiEvent (event);
+        }
         else if (message.isController())
         {
-            event.type = QueuedMidiEvent::Type::controlChange;
-            event.noteOrController = static_cast<uint8_t> (message.getControllerNumber());
-            event.value = static_cast<uint8_t> (message.getControllerValue());
-            pushMidiEvent (event);
+            const int ctrlNum = message.getControllerNumber();
+            if (ctrlNum == 120 || ctrlNum == 121 || ctrlNum == 123)
+            {
+                event.type = QueuedMidiEvent::Type::allNotesOff;
+                pushMidiEvent (event);
+            }
+            else
+            {
+                event.type = QueuedMidiEvent::Type::controlChange;
+                event.noteOrController = static_cast<uint8_t> (ctrlNum);
+                event.value = static_cast<uint8_t> (message.getControllerValue());
+                pushMidiEvent (event);
+            }
         }
         else if (message.isPitchWheel())
         {
@@ -188,11 +206,6 @@ void HarmonyVisualizerAudioProcessor::processBlock (juce::AudioBuffer<float>& bu
             const int pitchValue = message.getPitchWheelValue(); // 0..16383, センター8192
             event.noteOrController = static_cast<uint8_t> (pitchValue & 0x7F);        // LSB 7bit
             event.value = static_cast<uint8_t> ((pitchValue >> 7) & 0x7F);            // MSB 7bit
-            pushMidiEvent (event);
-        }
-        else if (message.isAllNotesOff() || message.isAllSoundOff())
-        {
-            event.type = QueuedMidiEvent::Type::allNotesOff;
             pushMidiEvent (event);
         }
     }

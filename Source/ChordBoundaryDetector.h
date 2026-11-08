@@ -174,6 +174,10 @@ public:
                 isCc64Down = (event.value >= 64);
                 updatePedalState (currentTimeMs);
             }
+            else if (event.noteOrController == 120 || event.noteOrController == 121 || event.noteOrController == 123)
+            {
+                handleAllNotesOff (currentTimeMs);
+            }
         }
         else if (event.type == QueuedMidiEvent::Type::pitchWheel)
         {
@@ -193,6 +197,11 @@ public:
     void update (double currentTimeMs)
     {
         currentState.isChordCommitted = false;
+
+        if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
+        {
+            isBuildingInitialChord = false;
+        }
 
         if (isWindowOpen)
         {
@@ -255,6 +264,7 @@ public:
         lastTopNote = -1;
         lastTopNoteTimeMs = -9999.0;
         hasActiveCommittedChord = false;
+        isBuildingInitialChord = false;
         currentState = ChordState();
     }
 
@@ -272,6 +282,7 @@ private:
     int lastTopNote { -1 };                  // 直前のメロディ最高音（トップノート）
     double lastTopNoteTimeMs { -9999.0 };    // 直前の最高音打鍵時刻
     bool hasActiveCommittedChord { false };  // 現在最前面にコミット済みコードがあるか
+    bool isBuildingInitialChord { false };   // 和音の初期構築（アルペジオ等）フェーズ中フラグ
 
     bool isCc64Down { false };
     bool isPitchBendPedalDown { false };
@@ -334,6 +345,7 @@ private:
             accumulatedNotes = currentlyHeldNotes;
             pedalReleasedSinceLastChord = false;
             hasActiveCommittedChord = false;
+            isBuildingInitialChord = true;
         }
         else
         {
@@ -360,10 +372,11 @@ private:
         refreshSoundingNotes();
 
         // コード安定度に基づく後追い解決（倚音・掛留音の離鍵による収束）:
-        // 和音確定直後（appoggiaturaResolutionWindowMs以内）に、
-        // 不安定音（テンション・掛留音）が離鍵され、残った保持音の安定度が向上した場合、
-        // 直前の確定コードからその不安定音を除外して安定コードへ上書き更新する。
-        if (hasActiveCommittedChord && !currentState.notes.empty()
+        // 和音確定直後（appoggiaturaResolutionWindowMs以内）かつアルペジオ構築完了後に、
+        // 【最高音（トップノート）として打鍵された不安定音】が離鍵され、
+        // 残った保持音の安定度が向上した場合にのみ、確定コードからその不安定音を除外して安定コードへ上書き更新する。
+        if (hasActiveCommittedChord && !isBuildingInitialChord && !currentState.notes.empty()
+            && noteNumber == lastTopNote
             && (currentTimeMs - lastCommitTimeMs) <= appoggiaturaResolutionWindowMs)
         {
             auto it = std::find (currentState.notes.begin(), currentState.notes.end(), noteNumber);
@@ -481,6 +494,7 @@ private:
         notesInCurrentWindow.clear();
         isWindowOpen = false;
         hasActiveCommittedChord = false;
+        isBuildingInitialChord = false;
         lastTopNote = -1;
         lastTopNoteTimeMs = -9999.0;
         refreshSoundingNotes();
@@ -508,10 +522,20 @@ private:
             return;
         }
 
+        if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
+        {
+            isBuildingInitialChord = false;
+        }
+
         // =========================================================================
         // Issue 47: メロディ・経過音（非和声音）の自動判定とコード安定度に基づく後追い解決
+        // 以下の全条件を満たす場合のみメロディ・経過音判定を実施する:
+        // 1. 和音構築（アルペジオ）フェーズが完了していること（!isBuildingInitialChord）
+        // 2. 既に伴奏コードが3音以上（三和音以上）で確立していること（currentState.notes.size() >= 3）
+        // 3. 今回の窓での打鍵が単音であること（numNewNotes == 1）
+        // 4. 最前面にアクティブなコードが存在すること（hasActiveCommittedChord）
         // =========================================================================
-        if (hasActiveCommittedChord && !currentState.notes.empty() && numNewNotes == 1)
+        if (hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3 && numNewNotes == 1)
         {
             const int newNote = singleNewNote;
             const int currentBass = currentState.notes.front();
@@ -523,7 +547,11 @@ private:
             const bool isBassChange = (newNote < currentBass)
                 || (std::find (currentState.soundingNotes.begin(), currentState.soundingNotes.end(), currentBass) == currentState.soundingNotes.end());
 
-            if (!isBassChange)
+            if (isBassChange)
+            {
+                isBuildingInitialChord = true;
+            }
+            else
             {
                 // 伴奏（ベースおよび内声）が保持されているか判定
                 int accompanimentSoundingCount = 0;
