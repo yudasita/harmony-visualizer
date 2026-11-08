@@ -495,7 +495,6 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
                         aerialResistance = 0.15f;
                     }
                 }
-                }
                 else if (dist == 5) // 半音緊張（短2度/長7度）: 中程度の空気遠近耐性
                 {
                     lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.32f);
