@@ -183,13 +183,14 @@ void HarmonyVisualizerAudioProcessorEditor::drawPastChordLayers (juce::Graphics&
         return;
 
     // Zソート: 最も奥（末尾）から手前（index 1）へ向かって描画する
+    // 最前面（Z=0）との視覚的セパレーション（段差）を明確にするため、過去レイヤーの基準アルファを抑制
     for (size_t idx = chords.size() - 1; idx >= 1; --idx)
     {
         const auto& pastChord = chords[idx];
         if (pastChord.isEmpty())
             continue;
 
-        const float layerAlpha = pastChord.alpha * 0.58f;
+        const float layerAlpha = pastChord.alpha * 0.48f;
         drawChordRingAndPolygon (g, pastChord, layerAlpha, false);
     }
 }
@@ -200,8 +201,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
     if (chords.size() <= 1)
         return;
 
-    // 離鍵時も最前面コードの明瞭さを維持し、奥との前後関係が逆転しないようにする（fgAlpha = 1.0f）
-    constexpr float fgAlpha = 1.0f;
+    // 手前側（Z=0）では最前面コードの多角形・頂点ノードが主役として際立つよう、
+    // ボイスリーディング線の終端アルファを適度に抑えて「頂点の背後へ自然に潜り込む」バランスにする
+    constexpr float fgAlpha = 0.72f;
 
     // 世代間のボイスリーディング遷移ライン（光の糸）を奥（末尾）から手前（index 0）へ順に描画
     for (size_t idx = chords.size() - 1; idx >= 1; --idx)
@@ -218,8 +220,8 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
         const bool isLatestTransition = (idx == 1);
 
         // 一般声部は奥へ行くほど繊細に、ベースラインとトライトーン解決は奥でも骨格・緊張の軌跡として存在感を保つ
-        const float normalGenDamp = isLatestTransition ? 1.0f : 0.48f;
-        const float bassOrTensionGenDamp = isLatestTransition ? 1.0f : 0.82f;
+        const float normalGenDamp = isLatestTransition ? 0.88f : 0.44f;
+        const float bassOrTensionGenDamp = isLatestTransition ? 0.92f : 0.72f;
 
         const size_t pairIdx = idx - 1;
         if (voiceLeadingCache.size() <= pairIdx)
@@ -241,8 +243,8 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
             if (!conn.isBassLine())
             {
                 const float damp = conn.isTritoneResolution() ? bassOrTensionGenDamp : normalGenDamp;
-                const float fromAlpha = fromChord.alpha * 0.58f * damp;
-                const float toAlpha   = ((idx - 1 == 0) ? fgAlpha : (toChord.alpha * 0.68f)) * damp;
+                const float fromAlpha = fromChord.alpha * 0.52f * damp;
+                const float toAlpha   = ((idx - 1 == 0) ? (fgAlpha * 0.85f) : (toChord.alpha * 0.58f)) * damp;
                 drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
             }
         }
@@ -252,8 +254,8 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
         {
             if (conn.isBassLine())
             {
-                const float fromAlpha = fromChord.alpha * 0.68f * bassOrTensionGenDamp;
-                const float toAlpha   = ((idx - 1 == 0) ? fgAlpha : (toChord.alpha * 0.78f)) * bassOrTensionGenDamp;
+                const float fromAlpha = fromChord.alpha * 0.62f * bassOrTensionGenDamp;
+                const float toAlpha   = ((idx - 1 == 0) ? (fgAlpha * 0.95f) : (toChord.alpha * 0.68f)) * bassOrTensionGenDamp;
                 drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
             }
         }
@@ -274,7 +276,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
 
     const float midZ = (fromZ + toZ) * 0.5f;
     // ベースラインは奥に行っても細くなりすぎないよう最小スケールを高めに確保
-    const float minScale = conn.isBassLine() ? 0.50f : 0.35f;
+    const float minScale = conn.isBassLine() ? 0.48f : 0.34f;
     const float baseThickness = projection.getProjectedSize (pitchLine_thickness, midZ, minScale);
 
     float thicknessMultiplier = 1.0f;
@@ -295,7 +297,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
         {
             const int dist = juce::jlimit (1, 6, conn.circleDistance);
             outStart = pitchLine_colours[static_cast<size_t> (dist)];
-            outEnd   = outStart.brighter (0.2f);
+            outEnd   = outStart.brighter (0.16f);
         }
     };
 
@@ -304,18 +306,18 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
         case VoiceLeadingConnection::Type::BassLine:
         {
             // ルート音（ベースライン）の遷移色は他の遷移と同じ色体系に揃え、
-            // 「線の厚み」と「空気遠近への減衰耐性」で進行の骨格を表現する
-            thicknessMultiplier = isLatestTransition ? 1.85f : 1.65f;
-            alphaBoost = isLatestTransition ? 1.05f : 1.25f;
-            aerialResistance = 0.38f;
+            // 「線の厚み」と「空気遠近への減衰耐性」で進行の骨格を表現する（最前面多角形を食わない太さに調整）
+            thicknessMultiplier = isLatestTransition ? 1.42f : 1.30f;
+            alphaBoost = isLatestTransition ? 0.92f : 1.08f;
+            aerialResistance = 0.36f;
             resolveMovementColours (rawStartColour, rawEndColour);
             break;
         }
         case VoiceLeadingConnection::Type::PivotNote:
         {
             // 共通音の保持は平行に伸びるクリーンなエレクトリックシアンの光軸
-            thicknessMultiplier = isLatestTransition ? 1.15f : 0.85f;
-            alphaBoost = 0.90f;
+            thicknessMultiplier = isLatestTransition ? 0.95f : 0.75f;
+            alphaBoost = 0.78f;
             aerialResistance = 0.10f;
             rawStartColour = juce::Colour (0xff7dd3fc);
             rawEndColour   = juce::Colour (0xff38bdf8);
@@ -325,9 +327,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
         {
             // トライトーン解決は緊張色（クリムゾンローズ）から解決色（ミント/シアン）へのグラデーション
             // 霧の奥でも解決の軌跡が微かに発光し続けるよう高い空気遠近耐性を持たせる
-            thicknessMultiplier = isLatestTransition ? 1.75f : 1.40f;
-            alphaBoost = 1.20f;
-            aerialResistance = 0.62f;
+            thicknessMultiplier = isLatestTransition ? 1.35f : 1.15f;
+            alphaBoost = 0.98f;
+            aerialResistance = 0.58f;
             rawStartColour = pitchLine_colours[6]; // クリムゾンローズ（緊張）
             rawEndColour   = pitchLine_colours[1].interpolatedWith (pitchLine_colours[4], 0.45f); // シアン〜ミント（解決）
             break;
@@ -335,17 +337,17 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
         case VoiceLeadingConnection::Type::Stepwise:
         {
             // 半音・全音の近接移動は五度圏距離に応じた鮮やかな調和カラー
-            thicknessMultiplier = isLatestTransition ? 1.20f : 0.85f;
-            alphaBoost = 1.0f;
-            aerialResistance = (conn.circleDistance >= 5) ? 0.30f : 0.0f;
+            thicknessMultiplier = isLatestTransition ? 1.00f : 0.78f;
+            alphaBoost = 0.86f;
+            aerialResistance = (conn.circleDistance >= 5) ? 0.28f : 0.0f;
             resolveMovementColours (rawStartColour, rawEndColour);
             break;
         }
         case VoiceLeadingConnection::Type::Converged:
         {
             // 合流ラインは少し繊細な線幅で解決先へ吸い込まれるように描画
-            thicknessMultiplier = isLatestTransition ? 0.95f : 0.70f;
-            alphaBoost = 0.80f;
+            thicknessMultiplier = isLatestTransition ? 0.82f : 0.62f;
+            alphaBoost = 0.72f;
             aerialResistance = 0.0f;
             const int dist = juce::jlimit (1, 6, conn.circleDistance > 0 ? conn.circleDistance : 2);
             rawStartColour = pitchLine_colours[static_cast<size_t> (dist)];
@@ -356,7 +358,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
 
     const float finalFromAlpha = juce::jlimit (0.0f, 1.0f, fromAlpha * alphaBoost);
     const float finalToAlpha   = juce::jlimit (0.0f, 1.0f, toAlpha   * alphaBoost);
-    const float strokeWidth    = std::max (1.0f, baseThickness * thicknessMultiplier);
+    const float strokeWidth    = std::max (0.9f, baseThickness * thicknessMultiplier);
 
     // 始点（奥 fromZ）と終点（手前 toZ）それぞれに深度に応じた空気遠近法（彩度低下＋背景スレートブレンド）を適用
     const juce::Colour startColour = applyAerialPerspective (rawStartColour, fromZ, 1.0f, aerialResistance);
@@ -366,51 +368,52 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
 
     // =========================================================================
     // 多層ブルーム（Multi-layer Bloom）＋ 被写界深度（Depth of Field）レンダリング
-    // 奥ほどシャープな芯（Core）を溶かし、太く柔らかい拡散光（Halo）の比率を高めてレンズボケを表現する
+    // 奥ほどシャープな芯（Core）を溶かし、太く柔らかい拡散光（Halo）の比率を高めてレンズボケを表現する。
+    // 手前（toZ=0）側では最前面コード多角形の背後へ自然に潜り込むよう、終端輝度とブルーム広がりを抑制する。
     // =========================================================================
     const float fromBlur = getDepthOfFieldBlurFactor (fromZ);
     const float toBlur   = getDepthOfFieldBlurFactor (toZ);
     const float avgBlur  = 0.5f * (fromBlur + toBlur);
 
     // Layer 1: 最外層ソフトブラー（奥ほどボケ半径が広がり、柔らかい拡散光になる）
-    const float haloWidth = strokeWidth * (conn.isBassLine() ? 4.2f : 3.8f) * (1.0f + avgBlur * 0.65f);
+    const float haloWidth = strokeWidth * (conn.isBassLine() ? 3.4f : 3.0f) * (1.0f + avgBlur * 0.65f);
     juce::ColourGradient broadGlowGrad (
-        startColour.withMultipliedAlpha (finalFromAlpha * (0.14f + fromBlur * 0.14f)), pFrom.x, pFrom.y,
-        endColour.withMultipliedAlpha   (finalToAlpha   * (0.18f + toBlur   * 0.12f)), pTo.x,   pTo.y,
+        startColour.withMultipliedAlpha (finalFromAlpha * (0.13f + fromBlur * 0.13f)), pFrom.x, pFrom.y,
+        endColour.withMultipliedAlpha   (finalToAlpha   * (0.12f + toBlur   * 0.10f)), pTo.x,   pTo.y,
         false);
     g.setGradientFill (broadGlowGrad);
     g.drawLine (line, haloWidth);
 
     // Layer 2: 中間層ソフトガウスローブ（ボケの中核を担う柔らかい光帯）
-    const float bloomWidth = strokeWidth * (conn.isBassLine() ? 2.3f : 2.0f) * (1.0f + avgBlur * 0.40f);
+    const float bloomWidth = strokeWidth * (conn.isBassLine() ? 1.9f : 1.65f) * (1.0f + avgBlur * 0.40f);
     juce::ColourGradient innerBloomGrad (
-        startColour.withMultipliedAlpha (finalFromAlpha * (0.36f + fromBlur * 0.10f)), pFrom.x, pFrom.y,
-        endColour.withMultipliedAlpha   (finalToAlpha   * (0.44f + toBlur   * 0.08f)), pTo.x,   pTo.y,
+        startColour.withMultipliedAlpha (finalFromAlpha * (0.32f + fromBlur * 0.10f)), pFrom.x, pFrom.y,
+        endColour.withMultipliedAlpha   (finalToAlpha   * (0.30f + toBlur   * 0.08f)), pTo.x,   pTo.y,
         false);
     g.setGradientFill (innerBloomGrad);
     g.drawLine (line, bloomWidth);
 
-    // Layer 3: メインのカラー光線ビーム（奥ではエッジの鋭さを落として周囲のボケに溶け込ませる）
+    // Layer 3: メインのカラー光線ビーム（手前終端では最前面コードに主役を譲るよう適度に収束）
     juce::ColourGradient mainBeamGrad (
-        startColour.withMultipliedAlpha (finalFromAlpha * (0.85f * (1.0f - fromBlur * 0.45f))), pFrom.x, pFrom.y,
-        endColour.withMultipliedAlpha   (finalToAlpha   * (0.95f * (1.0f - toBlur   * 0.45f))), pTo.x,   pTo.y,
+        startColour.withMultipliedAlpha (finalFromAlpha * (0.80f * (1.0f - fromBlur * 0.45f))), pFrom.x, pFrom.y,
+        endColour.withMultipliedAlpha   (finalToAlpha   * (0.74f * (1.0f - toBlur   * 0.45f))), pTo.x,   pTo.y,
         false);
     g.setGradientFill (mainBeamGrad);
     g.drawLine (line, strokeWidth * (1.0f + avgBlur * 0.15f));
 
-    // Layer 4: 中心高エネルギーコア（手前はシャープなピントの芯、奥に行くほどボケて消失する）
-    const float coreWidth = std::max (0.8f, strokeWidth * 0.38f);
+    // Layer 4: 中心コア（色味を残した上品な芯線とし、純白ハイライトは最前面コード多角形に譲る）
+    const float coreWidth = std::max (0.75f, strokeWidth * 0.34f);
     const float fromFog = getAerialFogFactor (fromZ, aerialResistance);
     const float toFog   = getAerialFogFactor (toZ,   aerialResistance);
     const float fromCoreSharpness = std::max (0.04f, 1.0f - fromBlur * 0.88f);
     const float toCoreSharpness   = std::max (0.04f, 1.0f - toBlur   * 0.88f);
 
     const juce::Colour coreStart = applyAerialPerspective (
-        juce::Colours::white.interpolatedWith (rawStartColour, 0.25f + fromFog * 0.55f),
-        fromZ, finalFromAlpha * 0.80f * fromCoreSharpness, aerialResistance);
+        juce::Colours::white.interpolatedWith (rawStartColour, 0.42f + fromFog * 0.45f),
+        fromZ, finalFromAlpha * 0.65f * fromCoreSharpness, aerialResistance);
     const juce::Colour coreEnd = applyAerialPerspective (
-        juce::Colours::white.interpolatedWith (rawEndColour, 0.20f + toFog * 0.55f),
-        toZ, finalToAlpha * 0.92f * toCoreSharpness, aerialResistance);
+        juce::Colours::white.interpolatedWith (rawEndColour, 0.45f + toFog * 0.45f),
+        toZ, finalToAlpha * 0.58f * toCoreSharpness, aerialResistance);
 
     juce::ColourGradient coreGrad (
         coreStart, pFrom.x, pFrom.y,
@@ -419,11 +422,11 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
     g.setGradientFill (coreGrad);
     g.drawLine (line, coreWidth);
 
-    // Layer 5: 端点（音ノードとの接続部）の結合グロー
+    // Layer 5: 端点（音ノードとの接続部）の控えめな収束グロー（最前面頂点ハロの背後に馴染ませる）
     if (isLatestTransition)
     {
-        const float dotGlowRadius = strokeWidth * 1.5f;
-        g.setColour (endColour.withMultipliedAlpha (finalToAlpha * 0.32f));
+        const float dotGlowRadius = strokeWidth * 1.15f;
+        g.setColour (endColour.withMultipliedAlpha (finalToAlpha * 0.16f));
         g.fillEllipse (pTo.x - dotGlowRadius, pTo.y - dotGlowRadius, dotGlowRadius * 2.0f, dotGlowRadius * 2.0f);
     }
 }
@@ -481,9 +484,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
 
             // リング上の頂点ポイントにも発音中の光彩オーラを付与
             const auto ringPt = projection.projectCircleIndex (i, 0.0f, 1.0f);
-            const float ptHaloRadius = pitchPoint_radius * 2.6f;
+            const float ptHaloRadius = pitchPoint_radius * 2.8f;
             juce::ColourGradient ptGlow (
-                glowBase.withAlpha (0.45f), ringPt.x, ringPt.y,
+                glowBase.withAlpha (0.48f), ringPt.x, ringPt.y,
                 glowBase.withAlpha (0.0f),  ringPt.x + ptHaloRadius, ringPt.y,
                 true);
             g.setGradientFill (ptGlow);
@@ -497,7 +500,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
         {
             // 離鍵後の確定構成音はクリーンな通常ハイライト（発光なし）、非構成音は控えめなグレー
             g.setFont (regularFont);
-            const juce::Colour textColour = isInChord ? pointColour.withAlpha (0.88f) : inactiveNoteColour;
+            const juce::Colour textColour = isInChord ? pointColour.withAlpha (0.92f) : inactiveNoteColour;
             g.setColour (textColour);
             g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
         }
@@ -516,42 +519,67 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     const float projectedDiameter = projectedRadius * 2.0f;
     const float ringThickness = projection.getProjectedSize (circleThickness, z, 0.35f);
 
-    // 1. 深度 Z における五度圏リング（空気遠近＋被写界深度により奥のリングほど柔らかくボケて霞む）
-    const float ringAlpha = isForeground ? 1.0f : juce::jlimit (0.10f, 0.65f, effectiveAlpha * 0.78f);
-    if (!isForeground && dofBlur > 0.05f)
+    // 1. 深度 Z における五度圏リング（最前面は明度・リムハイライトを高め、奥のリングほど柔らかくボケて霞ませる）
+    if (isForeground)
     {
-        const juce::Colour ringBlurCol = applyAerialPerspective (
-            circleColour.brighter (0.08f), z, ringAlpha * 0.38f * dofBlur, 0.15f);
-        g.setColour (ringBlurCol);
+        // 最前面（Z=0）リングのソフトアウターグローと高コントラストなメインリム
+        g.setColour (circleColour.brighter (0.35f).withAlpha (0.26f * effectiveAlpha));
         g.drawEllipse (circleCenter.x - projectedRadius,
                        circleCenter.y - projectedRadius,
                        projectedDiameter,
                        projectedDiameter,
-                       ringThickness * (1.0f + dofBlur * 1.9f));
-    }
+                       ringThickness * 2.4f);
 
-    const float ringCoreAlpha = isForeground ? 1.0f : ringAlpha * (1.0f - dofBlur * 0.48f);
-    const juce::Colour ringCol = isForeground
-        ? circleColour
-        : applyAerialPerspective (circleColour.brighter (0.08f), z, ringCoreAlpha, 0.15f);
-    g.setColour (ringCol);
-    g.drawEllipse (circleCenter.x - projectedRadius,
-                   circleCenter.y - projectedRadius,
-                   projectedDiameter,
-                   projectedDiameter,
-                   ringThickness);
+        g.setColour (circleColour.brighter (0.28f).withAlpha (effectiveAlpha));
+        g.drawEllipse (circleCenter.x - projectedRadius,
+                       circleCenter.y - projectedRadius,
+                       projectedDiameter,
+                       projectedDiameter,
+                       ringThickness * 1.25f);
+
+        g.setColour (juce::Colours::white.withAlpha (0.12f * effectiveAlpha));
+        g.drawEllipse (circleCenter.x - projectedRadius,
+                       circleCenter.y - projectedRadius,
+                       projectedDiameter,
+                       projectedDiameter,
+                       ringThickness * 0.55f);
+    }
+    else
+    {
+        const float ringAlpha = juce::jlimit (0.08f, 0.52f, effectiveAlpha * 0.68f);
+        if (dofBlur > 0.05f)
+        {
+            const juce::Colour ringBlurCol = applyAerialPerspective (
+                circleColour, z, ringAlpha * 0.34f * dofBlur, 0.08f);
+            g.setColour (ringBlurCol);
+            g.drawEllipse (circleCenter.x - projectedRadius,
+                           circleCenter.y - projectedRadius,
+                           projectedDiameter,
+                           projectedDiameter,
+                           ringThickness * (1.0f + dofBlur * 1.9f));
+        }
+
+        const float ringCoreAlpha = ringAlpha * (1.0f - dofBlur * 0.52f);
+        const juce::Colour ringCol = applyAerialPerspective (circleColour, z, ringCoreAlpha, 0.08f);
+        g.setColour (ringCol);
+        g.drawEllipse (circleCenter.x - projectedRadius,
+                       circleCenter.y - projectedRadius,
+                       projectedDiameter,
+                       projectedDiameter,
+                       ringThickness);
+    }
 
     // 2. 最前面のみ12音位置の控えめなガイドドットを描画
     if (isForeground)
     {
-        const float guideDotRadius = pitchPoint_radius * 0.35f;
+        const float guideDotRadius = pitchPoint_radius * 0.38f;
         const float guideDotDiameter = guideDotRadius * 2.0f;
         for (int i = 0; i < 12; ++i)
         {
             if (!chord.hasCircleIndex (i))
             {
                 const auto p = projection.projectCircleIndex (i, 0.0f, 1.0f);
-                g.setColour (inactiveDotColour);
+                g.setColour (inactiveDotColour.brighter (0.14f));
                 g.fillEllipse (p.x - guideDotRadius, p.y - guideDotRadius, guideDotDiameter, guideDotDiameter);
             }
         }
@@ -564,9 +592,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     const float ptRadius = projection.getProjectedSize (pitchPoint_radius, z, 0.35f);
     const float ptDiameter = ptRadius * 2.0f;
 
-    // 3. 構成音間のインターバル線と頂点ポイントを透視投影座標＋空気遠近法で描画
-    // 安定音程（dist=1..4）は奥へ行くほど霞んで背景に溶け込み、
-    // トライトーン（dist=6）や短2度（dist=5）の緊張音程は空気遠近に耐性を持ち霧の奥でも微かに発光し続ける
+    // 3. 構成音間のインターバル線を透視投影座標＋空気遠近法で描画
+    // 最前面（Z=0）はアウターブルーム＋高輝度コアハイライトで立体空間の主役として鮮やかに発光させる。
+    // 奥の世代（Z>=1）は安定音程（dist=1..4）ほど霞んで背景に溶け込み、緊張音程（dist=5,6）のみ微かに残響発光させる。
     for (size_t i = 0; i < chord.circleIndices.size(); ++i)
     {
         const int idxA = chord.circleIndices[i];
@@ -586,86 +614,139 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
                 ? pitchLine_colours[static_cast<size_t> (dist)]
                 : juce::Colours::white;
 
-            float lineAlpha = effectiveAlpha;
-            float lineThickness = defaultLineThickness;
-            float aerialResistance = 0.0f;
-
-            if (!isForeground)
+            if (isForeground)
             {
-                if (dist == 6) // トライトーン（最大緊張）: ペアごとに未解決なら空気遠近耐性(0.65)と発光を持続、解決済みなら落ち着かせる
+                const float fgLineScale = (dist == 6) ? 1.42f : ((dist == 5) ? 1.30f : 1.22f);
+                const float fgLineThickness = defaultLineThickness * fgLineScale;
+
+                // Layer A: 最前面インターバル線のソフトアウターブルーム
+                g.setColour (baseIntervalCol.withMultipliedAlpha (effectiveAlpha * 0.24f));
+                g.drawLine (intervalLine, fgLineThickness * 3.4f);
+
+                // Layer B: 中間グロウ層（色彩の彩度・発光感を支える）
+                g.setColour (baseIntervalCol.brighter (0.15f).withMultipliedAlpha (effectiveAlpha * 0.48f));
+                g.drawLine (intervalLine, fgLineThickness * 1.95f);
+
+                // Layer C: 鮮やかなメインインターバル線
+                g.setColour (baseIntervalCol.brighter (0.12f).withMultipliedAlpha (effectiveAlpha * 0.96f));
+                g.drawLine (intervalLine, fgLineThickness);
+
+                // Layer D: 高輝度コアハイライト（白〜インターバル色のシャープな芯線）
+                const float fgCoreWidth = std::max (0.9f, fgLineThickness * 0.42f);
+                const juce::Colour fgCoreCol = juce::Colours::white
+                    .interpolatedWith (baseIntervalCol, 0.32f)
+                    .withMultipliedAlpha (effectiveAlpha * 0.88f);
+                g.setColour (fgCoreCol);
+                g.drawLine (intervalLine, fgCoreWidth);
+            }
+            else
+            {
+                float lineAlpha = effectiveAlpha;
+                float lineThickness = defaultLineThickness;
+                float aerialResistance = 0.0f;
+
+                if (dist == 6) // トライトーン（最大緊張）: ペアごとに未解決なら空気遠近耐性と発光を持続、解決済みなら落ち着かせる
                 {
                     const bool pairResolved = chord.isTritonePairResolved (idxA, idxB);
                     if (!pairResolved)
                     {
-                        lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.65f);
-                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.5f, z, 0.45f);
-                        aerialResistance = 0.65f;
+                        lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.38f);
+                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.35f, z, 0.40f);
+                        aerialResistance = 0.58f;
                     }
                     else
                     {
                         // 既に解決したトライトーンペアは発光を消し、安定音程に近い落ち着いた輝度へ減衰
-                        lineAlpha = effectiveAlpha * 0.72f;
-                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.1f, z, 0.35f);
-                        aerialResistance = 0.15f;
+                        lineAlpha = effectiveAlpha * 0.58f;
+                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.05f, z, 0.35f);
+                        aerialResistance = 0.12f;
                     }
                 }
                 else if (dist == 5) // 半音緊張（短2度/長7度）: 中程度の空気遠近耐性
                 {
-                    lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.32f);
-                    lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.25f, z, 0.40f);
-                    aerialResistance = 0.35f;
+                    lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.15f);
+                    lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.18f, z, 0.38f);
+                    aerialResistance = 0.30f;
                 }
                 else // 安定音程（完全5度/4度、長短3度/6度など）: 空気遠近で奥の霧へ滑らかに減衰
                 {
-                    lineAlpha = effectiveAlpha * 0.62f;
+                    lineAlpha = effectiveAlpha * 0.52f;
                     aerialResistance = 0.0f;
                 }
 
                 // 被写界深度（DoF）ソフトガウスブラー層：奥の線ほど太く柔らかい光帯として滲ませる
                 const float outerBlurWidth = lineThickness * (1.8f + dofBlur * 2.2f);
-                const float outerBlurAlpha = lineAlpha * ((dist == 6) ? 0.32f : 0.22f) * (0.35f + dofBlur * 0.65f);
+                const float outerBlurAlpha = lineAlpha * ((dist == 6) ? 0.28f : 0.18f) * (0.35f + dofBlur * 0.65f);
                 g.setColour (applyAerialPerspective (baseIntervalCol, z, outerBlurAlpha, aerialResistance));
                 g.drawLine (intervalLine, outerBlurWidth);
 
                 const float midBlurWidth = lineThickness * (1.2f + dofBlur * 0.95f);
-                const float midBlurAlpha = lineAlpha * 0.42f * (0.4f + dofBlur * 0.6f);
+                const float midBlurAlpha = lineAlpha * 0.36f * (0.4f + dofBlur * 0.6f);
                 g.setColour (applyAerialPerspective (baseIntervalCol, z, midBlurAlpha, aerialResistance));
                 g.drawLine (intervalLine, midBlurWidth);
+
+                // 奥の世代の中心芯線：奥に行くほど芯のアルファを落としてボケに溶かす
+                const float coreLineAlpha = lineAlpha * (1.0f - dofBlur * 0.65f);
+                g.setColour (applyAerialPerspective (baseIntervalCol, z, coreLineAlpha, aerialResistance));
+                g.drawLine (intervalLine, lineThickness);
             }
-
-            // 中心の芯：手前（Z=0）は100%シャープ、奥に行くほど芯のアルファを落としてボケに溶かす
-            const float coreLineAlpha = isForeground
-                ? lineAlpha
-                : lineAlpha * (1.0f - dofBlur * 0.62f);
-            const juce::Colour finalLineCol = isForeground
-                ? getIntervalColour (dist, coreLineAlpha)
-                : applyAerialPerspective (baseIntervalCol, z, coreLineAlpha, aerialResistance);
-
-            g.setColour (finalLineCol);
-            g.drawLine (intervalLine, lineThickness);
         }
+    }
 
+    // 4. 構成音ポイント（頂点ノード）をインターバル線の上に重ねて描画
+    for (size_t i = 0; i < chord.circleIndices.size(); ++i)
+    {
+        const int idxA = chord.circleIndices[i];
+        const juce::Point<float> startPoint = projection.projectCircleIndex (idxA, z, 1.0f);
         const bool isRoot = (idxA == chord.bassCircleIndex);
         const juce::Colour rawPtColour = isRoot ? pointColour_root : pointColour;
         const float ptResistance = isRoot ? 0.35f : 0.0f;
 
-        if (!isForeground && dofBlur > 0.05f)
+        if (isForeground)
         {
-            // 奥の頂点ポイントの玉ボケ（Bokeh）ハロー
-            const float bokehRadius = ptRadius * (1.35f + dofBlur * 1.15f);
-            const juce::Colour bokehCol = applyAerialPerspective (
-                rawPtColour, z, effectiveAlpha * 0.36f * dofBlur, ptResistance);
-            g.setColour (bokehCol);
-            g.fillEllipse (startPoint.x - bokehRadius, startPoint.y - bokehRadius, bokehRadius * 2.0f, bokehRadius * 2.0f);
+            // 最前面（Z=0）の構成音頂点ノード：ソフトな光彩ハロ＋鮮やかな本体＋高輝度コアで
+            // ボイスリーディング線の端点に埋もれずくっきりと最前面に浮き立たせる
+            const float haloRadius = ptRadius * (isRoot ? 2.75f : 2.25f);
+            const juce::Colour haloCol = isRoot
+                ? pointColour_root
+                : juce::Colour (0xff38bdf8).interpolatedWith (pointColour, 0.45f);
+
+            juce::ColourGradient ptHalo (
+                haloCol.withAlpha (effectiveAlpha * (isRoot ? 0.46f : 0.36f)), startPoint.x, startPoint.y,
+                haloCol.withAlpha (0.0f), startPoint.x + haloRadius, startPoint.y,
+                true);
+            ptHalo.addColour (0.48, haloCol.withAlpha (effectiveAlpha * (isRoot ? 0.18f : 0.13f)));
+            g.setGradientFill (ptHalo);
+            g.fillEllipse (startPoint.x - haloRadius, startPoint.y - haloRadius, haloRadius * 2.0f, haloRadius * 2.0f);
+
+            const float fgPtRadius = ptRadius * (isRoot ? 1.26f : 1.14f);
+            g.setColour (rawPtColour.withMultipliedAlpha (effectiveAlpha));
+            g.fillEllipse (startPoint.x - fgPtRadius, startPoint.y - fgPtRadius, fgPtRadius * 2.0f, fgPtRadius * 2.0f);
+
+            const float coreRadius = fgPtRadius * (isRoot ? 0.48f : 0.52f);
+            const juce::Colour coreCol = isRoot
+                ? juce::Colours::white.interpolatedWith (pointColour_root, 0.22f)
+                : juce::Colours::white;
+            g.setColour (coreCol.withMultipliedAlpha (effectiveAlpha * 0.95f));
+            g.fillEllipse (startPoint.x - coreRadius, startPoint.y - coreRadius, coreRadius * 2.0f, coreRadius * 2.0f);
         }
+        else
+        {
+            if (dofBlur > 0.05f)
+            {
+                // 奥の頂点ポイントの玉ボケ（Bokeh）ハロー
+                const float bokehRadius = ptRadius * (1.35f + dofBlur * 1.15f);
+                const juce::Colour bokehCol = applyAerialPerspective (
+                    rawPtColour, z, effectiveAlpha * 0.32f * dofBlur, ptResistance);
+                g.setColour (bokehCol);
+                g.fillEllipse (startPoint.x - bokehRadius, startPoint.y - bokehRadius, bokehRadius * 2.0f, bokehRadius * 2.0f);
+            }
 
-        const float ptCoreAlpha = isForeground ? effectiveAlpha : effectiveAlpha * (1.0f - dofBlur * 0.48f);
-        const juce::Colour finalPtColour = isForeground
-            ? rawPtColour.withMultipliedAlpha (ptCoreAlpha)
-            : applyAerialPerspective (rawPtColour, z, ptCoreAlpha, ptResistance);
-
-        g.setColour (finalPtColour);
-        g.fillEllipse (startPoint.x - ptRadius, startPoint.y - ptRadius, ptDiameter, ptDiameter);
+            const float ptCoreAlpha = effectiveAlpha * (1.0f - dofBlur * 0.52f);
+            const juce::Colour finalPtColour = applyAerialPerspective (rawPtColour, z, ptCoreAlpha, ptResistance);
+            g.setColour (finalPtColour);
+            g.fillEllipse (startPoint.x - ptRadius, startPoint.y - ptRadius, ptDiameter, ptDiameter);
+        }
     }
 }
 
