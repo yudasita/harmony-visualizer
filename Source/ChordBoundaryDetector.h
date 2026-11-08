@@ -16,6 +16,7 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "ChordEvent.h"
 #include <vector>
 #include <set>
 #include <functional>
@@ -29,6 +30,7 @@ public:
     {
         std::vector<int> notes;          // 確定した構成音（MIDIノート番号ソート済み）
         std::vector<int> soundingNotes;  // 現在実際に発音中の音（押鍵中、またはペダル保持中）
+        uint16_t soundingCircleMask { 0 }; // 現在発音中の五度圏インデックスビットマスク（O(1)描画判定用）
         bool isDimmed { false };         // 演奏待機状態（全離鍵＆ペダルOFF状態）
         bool isChordCommitted { false }; // 今回の更新で新コードが確定したかのトリガー
     };
@@ -79,12 +81,18 @@ public:
         if (midiNotes.empty())
             return 0.0f;
 
+        uint16_t pcMask = 0;
         std::vector<int> uniquePcs;
+        uniquePcs.reserve (midiNotes.size());
+
         for (int note : midiNotes)
         {
-            const int pc = ((note % 12) + 12) % 12;
-            if (std::find (uniquePcs.begin(), uniquePcs.end(), pc) == uniquePcs.end())
+            const int pc = ChordEvent::normalizePitchClass (note);
+            if ((pcMask & (1u << pc)) == 0)
+            {
+                pcMask |= static_cast<uint16_t> (1u << pc);
                 uniquePcs.push_back (pc);
+            }
         }
 
         if (uniquePcs.size() < 2)
@@ -95,13 +103,11 @@ public:
         // 1. 各音対の五度圏距離に基づく協和度・緊張度
         for (size_t i = 0; i < uniquePcs.size(); ++i)
         {
-            const int circleI = (uniquePcs[i] * 7) % 12;
+            const int circleI = ChordEvent::pitchClassToCircleIndex (uniquePcs[i]);
             for (size_t j = i + 1; j < uniquePcs.size(); ++j)
             {
-                const int circleJ = (uniquePcs[j] * 7) % 12;
-                int dist = std::abs (circleI - circleJ);
-                if (dist > 6)
-                    dist = 12 - dist;
+                const int circleJ = ChordEvent::pitchClassToCircleIndex (uniquePcs[j]);
+                const int dist = ChordEvent::circleDistance (circleI, circleJ);
 
                 switch (dist)
                 {
@@ -116,23 +122,23 @@ public:
             }
         }
 
-        // 2. メジャー三和音 / マイナー三和音の骨格ボーナス
+        // 2. メジャー三和音 / マイナー三和音の骨格ボーナス（ビットマスクによるO(1)判定）
         for (int root : uniquePcs)
         {
             const int majorThird = (root + 4) % 12;
             const int minorThird = (root + 3) % 12;
             const int fifth = (root + 7) % 12;
 
-            const bool hasFifth = (std::find (uniquePcs.begin(), uniquePcs.end(), fifth) != uniquePcs.end());
-            const bool hasM3 = (std::find (uniquePcs.begin(), uniquePcs.end(), majorThird) != uniquePcs.end());
-            const bool hasm3 = (std::find (uniquePcs.begin(), uniquePcs.end(), minorThird) != uniquePcs.end());
+            const bool hasFifth = (pcMask & (1u << fifth)) != 0;
+            const bool hasM3    = (pcMask & (1u << majorThird)) != 0;
+            const bool hasm3    = (pcMask & (1u << minorThird)) != 0;
 
             if (hasFifth && (hasM3 || hasm3))
             {
                 score += 5.0f;
 
                 // ベース音がこの三和音のルートであればさらに安定ボーナス
-                const int bassPc = ((midiNotes.front() % 12) + 12) % 12;
+                const int bassPc = ChordEvent::normalizePitchClass (midiNotes.front());
                 if (bassPc == root)
                     score += 2.0f;
 
@@ -206,11 +212,7 @@ public:
     {
         currentState.isChordCommitted = false;
 
-        if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
-        {
-            isBuildingInitialChord = false;
-            isInitialArpeggioForPedalAllowed = false;
-        }
+        checkAndExpireInitialArpeggio (currentTimeMs);
 
         if (isWindowOpen)
         {
@@ -242,14 +244,7 @@ public:
         }
 
         // 離鍵状態（現在押鍵数0、ペダルOFF、かつリペダリング仮想サスティン保持なし）の判定
-        const bool hasVirtualSustain = isInRepedalWindow && !repedalNotes.empty();
-        if (currentlyHeldNotes.empty() && !isPedalDown && !hasVirtualSustain)
-        {
-            if (!currentState.notes.empty())
-            {
-                currentState.isDimmed = true;
-            }
-        }
+        updateDimmedState();
     }
 
     const ChordState& getCurrentChordState() const noexcept { return currentState; }
@@ -257,16 +252,7 @@ public:
     /** 指定された五度圏インデックス（0〜11）が現在発音中（押鍵中・ペダル保持中）か判定 */
     bool isCircleIndexSounding (int circleIdx) const noexcept
     {
-        if (circleIdx < 0 || circleIdx >= 12)
-            return false;
-
-        for (int note : currentState.soundingNotes)
-        {
-            const int pc = ((note % 12) + 12) % 12;
-            if (((pc * 7) % 12) == circleIdx)
-                return true;
-        }
-        return false;
+        return (circleIdx >= 0 && circleIdx < 12) && ((currentState.soundingCircleMask & (1u << circleIdx)) != 0);
     }
 
     using NewChordCallback = std::function<void (const std::vector<int>& notes)>;
@@ -304,6 +290,24 @@ public:
     }
 
 private:
+    void checkAndExpireInitialArpeggio (double currentTimeMs) noexcept
+    {
+        if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
+        {
+            isBuildingInitialChord = false;
+            isInitialArpeggioForPedalAllowed = false;
+        }
+    }
+
+    void updateDimmedState() noexcept
+    {
+        const bool hasVirtualSustain = isInRepedalWindow && !repedalNotes.empty();
+        if (currentlyHeldNotes.empty() && !isPedalDown && !hasVirtualSustain && !currentState.notes.empty())
+        {
+            currentState.isDimmed = true;
+        }
+    }
+
     double quantizeWindowMs { 60.0 };
     double windowStartTimeMs { 0.0 };
     bool isWindowOpen { false };
@@ -346,16 +350,30 @@ private:
 
     void refreshSoundingNotes()
     {
-        std::set<int> combined = currentlyHeldNotes;
+        currentState.soundingNotes.clear();
+        currentState.soundingNotes.reserve (currentlyHeldNotes.size() + sustainedNotes.size() + repedalNotes.size());
+
+        currentState.soundingNotes.insert (currentState.soundingNotes.end(),
+                                           currentlyHeldNotes.begin(), currentlyHeldNotes.end());
+
         if (isPedalDown)
-        {
-            combined.insert (sustainedNotes.begin(), sustainedNotes.end());
-        }
+            currentState.soundingNotes.insert (currentState.soundingNotes.end(),
+                                               sustainedNotes.begin(), sustainedNotes.end());
         else if (isInRepedalWindow)
+            currentState.soundingNotes.insert (currentState.soundingNotes.end(),
+                                               repedalNotes.begin(), repedalNotes.end());
+
+        std::sort (currentState.soundingNotes.begin(), currentState.soundingNotes.end());
+        currentState.soundingNotes.erase (std::unique (currentState.soundingNotes.begin(), currentState.soundingNotes.end()),
+                                          currentState.soundingNotes.end());
+
+        uint16_t mask = 0;
+        for (int note : currentState.soundingNotes)
         {
-            combined.insert (repedalNotes.begin(), repedalNotes.end());
+            const int circleIdx = ChordEvent::pitchClassToCircleIndex (ChordEvent::normalizePitchClass (note));
+            mask |= static_cast<uint16_t> (1u << circleIdx);
         }
-        currentState.soundingNotes.assign (combined.begin(), combined.end());
+        currentState.soundingCircleMask = mask;
     }
 
     void updatePedalState (double currentTimeMs)
@@ -530,11 +548,7 @@ private:
         // 指が1本ずつ離れるミリ秒単位のズレで構成音を削ってしまわないよう、
         // 直前の確定コード（currentState.notes）はそのまま維持する。
         // 全鍵盤が離鍵され、ペダルもOFFかつリペダリング仮想サスティン保持もなければ待機状態（dimmed）へ移行する。
-        const bool hasVirtualSustain = isInRepedalWindow && !repedalNotes.empty();
-        if (currentlyHeldNotes.empty() && !isPedalDown && !hasVirtualSustain && !currentState.notes.empty())
-        {
-            currentState.isDimmed = true;
-        }
+        updateDimmedState();
     }
 
     void handlePedalChange (bool down, double currentTimeMs)
@@ -679,7 +693,7 @@ private:
 
         std::set<int> uniquePitchClasses;
         for (int n : accumulatedNotes)
-            uniquePitchClasses.insert (((n % 12) + 12) % 12);
+            uniquePitchClasses.insert (ChordEvent::normalizePitchClass (n));
 
         const double elapsedSinceLastNote = (lastNoteOnTimeMs > 0.0) ? (currentTimeMs - lastNoteOnTimeMs) : 99999.0;
         if (numNewNotes >= 3 || (numNewNotes >= minNotesForChord && elapsedSinceLastNote > arpeggioThresholdMs))
@@ -689,11 +703,7 @@ private:
             isBuildingInitialChord = false;
         }
 
-        if (isBuildingInitialChord && lastNoteOnTimeMs > 0.0 && (currentTimeMs - lastNoteOnTimeMs >= arpeggioThresholdMs))
-        {
-            isBuildingInitialChord = false;
-            isInitialArpeggioForPedalAllowed = false;
-        }
+        checkAndExpireInitialArpeggio (currentTimeMs);
 
         // =========================================================================
         // Issue 47: メロディ・経過音（非和声音）の自動判定とコード安定度に基づく後追い解決
@@ -749,11 +759,11 @@ private:
                     std::vector<int> candidateNotes = currentState.notes;
 
                     // 新しい音のピッチクラスが既に含まれているか確認
-                    const int newPc = ((newNote % 12) + 12) % 12;
+                    const int newPc = ChordEvent::normalizePitchClass (newNote);
                     bool pcAlreadyInChord = false;
                     for (size_t i = 0; i + 1 < candidateNotes.size(); ++i)
                     {
-                        if ((((candidateNotes[i] % 12) + 12) % 12) == newPc)
+                        if (ChordEvent::normalizePitchClass (candidateNotes[i]) == newPc)
                         {
                             pcAlreadyInChord = true;
                             break;
@@ -822,20 +832,23 @@ private:
 
             if (bassUnchanged)
             {
-                std::set<int> prevPitchClasses;
+                uint16_t prevPcMask = 0;
+                size_t prevPcCount = 0;
                 for (int n : currentState.notes)
-                    prevPitchClasses.insert (((n % 12) + 12) % 12);
-
-                bool allContained = true;
-                for (int pc : prevPitchClasses)
                 {
-                    if (uniquePitchClasses.find (pc) == uniquePitchClasses.end())
+                    const int pc = ChordEvent::normalizePitchClass (n);
+                    if ((prevPcMask & (1u << pc)) == 0)
                     {
-                        allContained = false;
-                        break;
+                        prevPcMask |= static_cast<uint16_t> (1u << pc);
+                        ++prevPcCount;
                     }
                 }
-                if (allContained && uniquePitchClasses.size() >= prevPitchClasses.size())
+
+                uint16_t candPcMask = 0;
+                for (int p : uniquePitchClasses)
+                    candPcMask |= static_cast<uint16_t> (1u << p);
+
+                if (prevPcMask != 0 && (prevPcMask & ~candPcMask) == 0 && uniquePitchClasses.size() >= prevPcCount)
                     isSubsetGrowth = true;
             }
         }

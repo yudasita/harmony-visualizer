@@ -51,7 +51,7 @@ public:
      */
     juce::Colour getIntervalColour (int dist, float depthAlpha = 1.0f) const
     {
-        const juce::Colour baseColour = (dist >= 1 && dist <= 6)
+        const juce::Colour baseColour = (dist >= 0 && dist <= 6)
             ? pitchLine_colours[static_cast<size_t> (dist)]
             : juce::Colours::white;
         return baseColour.withMultipliedAlpha (juce::jlimit (0.0f, 1.0f, depthAlpha));
@@ -192,8 +192,8 @@ private:
     const juce::Colour pointColour_root   { 0xffff5a5f }; // ルート音（洗練されたコーラルアクセント）
     const juce::Colour pointColour        { 0xfff1f5f9 }; // 通常の構成音（クリーンオフホワイト）
     
-    // 五度圏上の距離（1〜6）に応じたインターバルカラー（Studio Slate 調和パレット）
-    // 0: 未使用
+    // 五度圏上の距離（0〜6）に応じたインターバルカラー（MUSIC_THEORY.md 準拠）
+    // 0: 完全1度/8度 (同音・オクターブ) -> スカイブルー
     // 1: 完全5度/4度 (最協和) -> クールシアン
     // 2: 長2度/短7度 (モード) -> ウォームアンバー
     // 3: 短3度/長6度 (マイナー) -> セージグリーン
@@ -201,7 +201,7 @@ private:
     // 5: 短2度/長7度 (半音緊張) -> ビビッドタンジェリン
     // 6: 増4度/減5度 (トライトーン) -> クリムゾンローズ
     const std::array<juce::Colour, 7> pitchLine_colours = {
-        juce::Colours::transparentBlack,
+        juce::Colour (0xff38bdf8),
         juce::Colour (0xff38bdf8),
         juce::Colour (0xfffbbf24),
         juce::Colour (0xff34d399),
@@ -209,6 +209,18 @@ private:
         juce::Colour (0xfff97316),
         juce::Colour (0xfff43f5e)
     };
+
+    // 60Hz描画ループ高速化・ゼロアロケーション用キャッシュ
+    std::vector<int> cachedForegroundNotes;
+    ChordEvent cachedForegroundChord;
+
+    struct VoiceLeadingCacheEntry
+    {
+        std::vector<int> fromNotes;
+        std::vector<int> toNotes;
+        std::vector<VoiceLeadingConnection> connections;
+    };
+    std::vector<VoiceLeadingCacheEntry> voiceLeadingCache;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HarmonyVisualizerAudioProcessorEditor)
 };

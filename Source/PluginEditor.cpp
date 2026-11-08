@@ -45,9 +45,7 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
         slider.setColour (juce::Slider::textBoxTextColourId, juce::Colour (0xffe2e8f0));
         slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colour (0xff141824));
         slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff2e374d));
-        slider.setVisible (false);
-        addAndMakeVisible (slider);
-        slider.setVisible (false);
+        addChildComponent (slider);
     };
 
     configureSlider (historySizeSlider, 2.0, 16.0, 1.0, " chords");
@@ -223,7 +221,19 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
         const float normalGenDamp = isLatestTransition ? 1.0f : 0.48f;
         const float bassOrTensionGenDamp = isLatestTransition ? 1.0f : 0.82f;
 
-        const auto connections = VoiceLeadingSolver::solve (fromChord, toChord);
+        const size_t pairIdx = idx - 1;
+        if (voiceLeadingCache.size() <= pairIdx)
+            voiceLeadingCache.resize (pairIdx + 1);
+
+        auto& cache = voiceLeadingCache[pairIdx];
+        if (cache.fromNotes != fromChord.midiNotes || cache.toNotes != toChord.midiNotes)
+        {
+            cache.fromNotes = fromChord.midiNotes;
+            cache.toNotes   = toChord.midiNotes;
+            cache.connections = VoiceLeadingSolver::solve (fromChord, toChord);
+        }
+
+        const auto& connections = cache.connections;
 
         // 1. 一般声部（PivotNote / Stepwise / Converged / TritoneResolution）を先に描画
         for (const auto& conn : connections)
@@ -424,10 +434,16 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
     // 離鍵時も最前面コード全体のアルファは 1.0f を維持し、1つ奥の世代より薄くなる逆転現象を防ぐ
     constexpr float alphaMultiplier = 1.0f;
 
-    ChordEvent foregroundChord = ChordEvent::fromMidiNotes (chordState.notes);
-    foregroundChord.zPosition = 0.0f;
-    foregroundChord.alpha = alphaMultiplier;
-    foregroundChord.generation = 0;
+    if (cachedForegroundNotes != chordState.notes)
+    {
+        cachedForegroundNotes = chordState.notes;
+        cachedForegroundChord = ChordEvent::fromMidiNotes (cachedForegroundNotes);
+    }
+
+    cachedForegroundChord.zPosition = 0.0f;
+    cachedForegroundChord.alpha = alphaMultiplier;
+    cachedForegroundChord.generation = 0;
+    const auto& foregroundChord = cachedForegroundChord;
 
     // 最前面のリング・ガイドドット・インターバル多角形・構成音ポイントを描画
     drawChordRingAndPolygon (g, foregroundChord, alphaMultiplier, true);
