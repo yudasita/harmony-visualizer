@@ -11,12 +11,12 @@
 
 | 項目 | 内容 |
 |---|---|
-| 名前 | ChordWeaver |
+| 名前 | MeLoom |
 | 種別 | オーディオプラグイン（VST3 / Standalone） |
 | カテゴリ | アナライザー / ビジュアライザー（Synth / MIDI Effect 特性） |
 | フレームワーク | JUCE (C++17) |
 | プロジェクト管理 | Projucer (`HarmonyVisualizer.jucer`) |
-| バンドル ID | `world.yuda.ChordWeaver` |
+| バンドル ID | `world.yuda.MeLoom` |
 | リポジトリ | https://github.com/yudasita/harmony-visualizer |
 | 目的 | MIDI 入力された和音・単音を五度圏（Circle of Fifths）上に配置し、音程間隔に応じた色彩の線分・多角形としてリアルタイムに可視化する |
 
@@ -52,7 +52,7 @@ macOS 環境で Xcode コマンドラインツール（`xcodebuild`）を使用�
 - **通常開発時は Debug 構成のみをビルドする**:
   - 機能追加、バグ修正、リファクタリング、動作確認などの通常開発サイクルでは、常に `-configuration Debug` を指定してビルドを行う。
   - Release ビルド（`-configuration Release`）はビルド時間が長く、Debug ビルド識別バッジ等も無効化されるため、公式配布物（ZIP/インストーラ）の作成やリリース時以外は原則としてビルドしない。
-  - 動作確認時も、常に `ChordWeaver(Debug).app` または Debug 版 VST3 プラグインを使用する。
+  - 動作確認時も、常に `MeLoom(Debug).app` または Debug 版 VST3 プラグインを使用する。
 
 ### 3.1 スタンドアロンアプリのビルド
 
@@ -66,7 +66,7 @@ xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
 
 ```sh
 # Debug ビルド成果物の起動
-open "Builds/MacOSX/build/Debug/ChordWeaver(Debug).app"
+open "Builds/MacOSX/build/Debug/MeLoom(Debug).app"
 ```
 
 ### 3.3 VST3 プラグインのビルド
