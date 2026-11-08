@@ -68,7 +68,9 @@ public:
 
             if (existing.hasUnresolvedTritone())
             {
-                if (existing.checkResolutionAgainst (chord))
+                // 1. 和声学的な順次解決（協和解決）のチェック
+                // 2. または新コード自身が新たなトライトーンを持つ場合（ツーファイブ進行や転調等での交代上書き）
+                if (existing.checkResolutionAgainst (chord) || chord.hasTritone())
                 {
                     existing.tritoneResolved = true;
                     existing.resolvedAtGeneration = existing.generation;
@@ -118,10 +120,13 @@ public:
         for (size_t i = 1; i < history.size(); ++i)
         {
             auto& past = history[i];
-            if (past.hasUnresolvedTritone() && past.checkResolutionAgainst (front))
+            if (past.hasUnresolvedTritone())
             {
-                past.tritoneResolved = true;
-                past.resolvedAtGeneration = past.generation;
+                if (past.checkResolutionAgainst (front) || front.hasTritone())
+                {
+                    past.tritoneResolved = true;
+                    past.resolvedAtGeneration = past.generation;
+                }
             }
         }
 
