@@ -197,7 +197,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawPastChordLayers (juce::Graphics&
 
 void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::Graphics& g)
 {
-    const auto& chords = chordHistory.getChords();
+    const auto& chords = chordHistory.getHistory();
     if (chords.size() <= 1)
         return;
 
@@ -205,60 +205,88 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
     // ボイスリーディング線の終端アルファを適度に抑えて「頂点の背後へ自然に潜り込む」バランスにする
     constexpr float fgAlpha = 0.72f;
 
-    // 世代間のボイスリーディング遷移ライン（光の糸）を奥（末尾）から手前（index 0）へ順に描画
-    for (size_t idx = chords.size() - 1; idx >= 1; --idx)
+    // コード履歴全体のノート構成スナップショットを比較し、変化があった場合のみ複数世代ソルバーを再計算
+    bool cacheNeedsUpdate = (voiceLeadingCache.chordNotesSnapshot.size() != chords.size());
+    if (!cacheNeedsUpdate)
     {
-        const auto& fromChord = chords[idx];
-        const auto& toChord   = chords[idx - 1];
+        for (size_t i = 0; i < chords.size(); ++i)
+        {
+            if (voiceLeadingCache.chordNotesSnapshot[i] != chords[i].midiNotes)
+            {
+                cacheNeedsUpdate = true;
+                break;
+            }
+        }
+    }
+
+    if (cacheNeedsUpdate)
+    {
+        voiceLeadingCache.chordNotesSnapshot.clear();
+        voiceLeadingCache.chordNotesSnapshot.reserve (chords.size());
+        for (const auto& ch : chords)
+            voiceLeadingCache.chordNotesSnapshot.push_back (ch.midiNotes);
+
+        voiceLeadingCache.connections = VoiceLeadingSolver::solveMultiGeneration (chords);
+    }
+
+    const auto& connections = voiceLeadingCache.connections;
+
+    // 1. 一般声部（PivotNote / Stepwise / Converged / TritoneResolution）を先に描画
+    for (const auto& conn : connections)
+    {
+        if (conn.isBassLine())
+            continue;
+
+        const size_t fromIdx = static_cast<size_t> (conn.fromGenerationIndex);
+        const size_t toIdx   = static_cast<size_t> (conn.toGenerationIndex);
+        if (fromIdx >= chords.size() || toIdx >= chords.size())
+            continue;
+
+        const auto& fromChord = chords[fromIdx];
+        const auto& toChord   = chords[toIdx];
 
         if (fromChord.isEmpty() || toChord.isEmpty())
             continue;
 
         const float fromZ = fromChord.zPosition;
-        const float toZ   = (idx - 1 == 0) ? 0.0f : toChord.zPosition;
+        const float toZ   = (toIdx == 0) ? 0.0f : toChord.zPosition;
+        const bool isLatestTransition = (toIdx == 0);
 
-        const bool isLatestTransition = (idx == 1);
+        // 一般声部は奥へ行くほど繊細に、トライトーン解決は奥でも緊張の軌跡として存在感を保つ
+        const float normalGenDamp = isLatestTransition ? 0.88f : (conn.isSkippedGeneration() ? 0.38f : 0.44f);
+        const float tensionGenDamp = isLatestTransition ? 0.92f : 0.72f;
+        const float damp = conn.isTritoneResolution() ? tensionGenDamp : normalGenDamp;
 
-        // 一般声部は奥へ行くほど繊細に、ベースラインとトライトーン解決は奥でも骨格・緊張の軌跡として存在感を保つ
-        const float normalGenDamp = isLatestTransition ? 0.88f : 0.44f;
-        const float bassOrTensionGenDamp = isLatestTransition ? 0.92f : 0.72f;
+        const float fromAlpha = fromChord.alpha * 0.52f * damp;
+        const float toAlpha   = ((toIdx == 0) ? (fgAlpha * 0.85f) : (toChord.alpha * 0.58f)) * damp;
+        drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
+    }
 
-        const size_t pairIdx = idx - 1;
-        if (voiceLeadingCache.size() <= pairIdx)
-            voiceLeadingCache.resize (pairIdx + 1);
+    // 2. ベースライン（骨格）をその上に重ねて描画（奥に行っても他よりしっかり残る減衰率）
+    for (const auto& conn : connections)
+    {
+        if (!conn.isBassLine())
+            continue;
 
-        auto& cache = voiceLeadingCache[pairIdx];
-        if (cache.fromNotes != fromChord.midiNotes || cache.toNotes != toChord.midiNotes)
-        {
-            cache.fromNotes = fromChord.midiNotes;
-            cache.toNotes   = toChord.midiNotes;
-            cache.connections = VoiceLeadingSolver::solve (fromChord, toChord);
-        }
+        const size_t fromIdx = static_cast<size_t> (conn.fromGenerationIndex);
+        const size_t toIdx   = static_cast<size_t> (conn.toGenerationIndex);
+        if (fromIdx >= chords.size() || toIdx >= chords.size())
+            continue;
 
-        const auto& connections = cache.connections;
+        const auto& fromChord = chords[fromIdx];
+        const auto& toChord   = chords[toIdx];
 
-        // 1. 一般声部（PivotNote / Stepwise / Converged / TritoneResolution）を先に描画
-        for (const auto& conn : connections)
-        {
-            if (!conn.isBassLine())
-            {
-                const float damp = conn.isTritoneResolution() ? bassOrTensionGenDamp : normalGenDamp;
-                const float fromAlpha = fromChord.alpha * 0.52f * damp;
-                const float toAlpha   = ((idx - 1 == 0) ? (fgAlpha * 0.85f) : (toChord.alpha * 0.58f)) * damp;
-                drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
-            }
-        }
+        if (fromChord.isEmpty() || toChord.isEmpty())
+            continue;
 
-        // 2. ベースライン（骨格）をその上に重ねて描画（奥に行っても他よりしっかり残る減衰率）
-        for (const auto& conn : connections)
-        {
-            if (conn.isBassLine())
-            {
-                const float fromAlpha = fromChord.alpha * 0.62f * bassOrTensionGenDamp;
-                const float toAlpha   = ((idx - 1 == 0) ? (fgAlpha * 0.95f) : (toChord.alpha * 0.68f)) * bassOrTensionGenDamp;
-                drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
-            }
-        }
+        const float fromZ = fromChord.zPosition;
+        const float toZ   = (toIdx == 0) ? 0.0f : toChord.zPosition;
+        const bool isLatestTransition = (toIdx == 0);
+
+        const float bassGenDamp = isLatestTransition ? 0.92f : (conn.isSkippedGeneration() ? 0.58f : 0.72f);
+        const float fromAlpha = fromChord.alpha * 0.62f * bassGenDamp;
+        const float toAlpha   = ((toIdx == 0) ? (fgAlpha * 0.95f) : (toChord.alpha * 0.68f)) * bassGenDamp;
+        drawSingleVoiceLeadingThread (g, conn, fromZ, toZ, fromAlpha, toAlpha, isLatestTransition);
     }
 }
 
@@ -354,6 +382,13 @@ void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
             rawEndColour   = pointColour.interpolatedWith (rawStartColour, 0.4f);
             break;
         }
+    }
+
+    // 世代スキップ接続（span >= 2）は中間層の視認性を損なわないよう、やや繊細で洗練された線幅にする
+    if (conn.isSkippedGeneration())
+    {
+        thicknessMultiplier *= (conn.generationSpan == 2) ? 0.88f : 0.80f;
+        aerialResistance = std::max (aerialResistance, 0.22f);
     }
 
     const float finalFromAlpha = juce::jlimit (0.0f, 1.0f, fromAlpha * alphaBoost);

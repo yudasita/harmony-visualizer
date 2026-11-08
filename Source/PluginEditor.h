@@ -214,13 +214,12 @@ private:
     std::vector<int> cachedForegroundNotes;
     ChordEvent cachedForegroundChord;
 
-    struct VoiceLeadingCacheEntry
+    struct MultiGenVoiceLeadingCache
     {
-        std::vector<int> fromNotes;
-        std::vector<int> toNotes;
+        std::vector<std::vector<int>> chordNotesSnapshot;
         std::vector<VoiceLeadingConnection> connections;
     };
-    std::vector<VoiceLeadingCacheEntry> voiceLeadingCache;
+    MultiGenVoiceLeadingCache voiceLeadingCache;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HarmonyVisualizerAudioProcessorEditor)
 };
