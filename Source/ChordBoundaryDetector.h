@@ -751,6 +751,64 @@ private:
             }
         }
 
+        // 既存のアクティブな伴奏コードの継続（同一コード上でのメロディ展開や音数の微増減）の判定:
+        // ※アルペジオ成長（!isNewChordStrike && isSubsetGrowth）は onUpdateChord で最前面を更新するため除外
+        bool isSameChordContinuation = false;
+        if (hasActiveCommittedChord && currentState.notes.size() >= 3 && newNotes.size() >= 2
+            && !(isSubsetGrowth && !isNewChordStrike))
+        {
+            const int currBass = currentState.notes.front();
+            const int candBass = newNotes.front();
+            const bool sameBassPc = (((candBass % 12) + 12) % 12) == (((currBass % 12) + 12) % 12);
+            const bool bassNotLower = (candBass >= currBass);
+
+            if (sameBassPc && bassNotLower)
+            {
+                std::set<int> currPcs;
+                for (int n : currentState.notes)
+                    currPcs.insert (((n % 12) + 12) % 12);
+
+                bool allInChord = true;
+                bool allAccompanimentInChord = true;
+                std::set<int> matchedAccompanimentPcs;
+
+                for (size_t i = 0; i < newNotes.size(); ++i)
+                {
+                    const int pc = ((newNotes[i] % 12) + 12) % 12;
+                    if (currPcs.find (pc) == currPcs.end())
+                    {
+                        allInChord = false;
+                        if (i + 1 < newNotes.size())
+                            allAccompanimentInChord = false;
+                    }
+                    else if (i + 1 < newNotes.size())
+                    {
+                        matchedAccompanimentPcs.insert (pc);
+                    }
+                }
+
+                if (allInChord || (allAccompanimentInChord && matchedAccompanimentPcs.size() >= 2))
+                {
+                    isSameChordContinuation = true;
+                }
+            }
+        }
+
+        if (isSameChordContinuation)
+        {
+            // 同一コードの継続：最前面コードの構成音は維持し、新リング送出（onNewChord）は行わない
+            currentState.isDimmed = false;
+            currentState.isChordCommitted = true;
+            lastCommitTimeMs = currentTimeMs;
+            if (!newNotes.empty())
+            {
+                lastTopNote = newNotes.back();
+                lastTopNoteTimeMs = currentTimeMs;
+            }
+            isNewChordStrike = false;
+            return;
+        }
+
         currentState.notes = newNotes;
         currentState.isDimmed = false;
         currentState.isChordCommitted = true;
