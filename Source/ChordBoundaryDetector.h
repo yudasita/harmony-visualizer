@@ -411,11 +411,7 @@ private:
                 std::vector<int> remainingNotes = currentState.notes;
                 remainingNotes.erase (std::remove (remainingNotes.begin(), remainingNotes.end(), noteNumber), remainingNotes.end());
 
-                std::set<int> remainingPcs;
-                for (int n : remainingNotes)
-                    remainingPcs.insert (((n % 12) + 12) % 12);
-
-                if (remainingPcs.size() >= static_cast<size_t> (minNotesForChord))
+                if (remainingNotes.size() >= static_cast<size_t> (minNotesForChord))
                 {
                     const float currentStability = calculateChordStability (currentState.notes);
                     const float remainingStability = calculateChordStability (remainingNotes);
@@ -572,16 +568,16 @@ private:
         const int singleNewNote = (numNewNotes == 1) ? notesInCurrentWindow.front() : -1;
         int melodyCandidateNote = singleNewNote;
 
-        // 最低音数フィルタ: ピッチクラス数が minNotesForChord 未満の場合はコードとして確定しない
-        // （単音演奏時は外周リングの soundingNotes のみ点灯させ、コード履歴キューへは送らない）
-        std::set<int> uniquePitchClasses;
-        for (int n : accumulatedNotes)
-            uniquePitchClasses.insert (((n % 12) + 12) % 12);
-
-        if (uniquePitchClasses.size() < static_cast<size_t> (minNotesForChord))
+        // 最低音数フィルタ: 異なるMIDIノート数が minNotesForChord（2音）未満の場合はコードとして確定しない
+        // （単音演奏時は外周リングの soundingNotes のみ点灯させ、オクターブユニゾン等の2音以上はコードとして確定する）
+        if (accumulatedNotes.size() < static_cast<size_t> (minNotesForChord))
         {
             return;
         }
+
+        std::set<int> uniquePitchClasses;
+        for (int n : accumulatedNotes)
+            uniquePitchClasses.insert (((n % 12) + 12) % 12);
 
         const double elapsedSinceLastNote = (lastNoteOnTimeMs > 0.0) ? (currentTimeMs - lastNoteOnTimeMs) : 99999.0;
         if (numNewNotes >= 3 || (numNewNotes >= minNotesForChord && elapsedSinceLastNote > arpeggioThresholdMs))

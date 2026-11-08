@@ -157,6 +157,14 @@ struct ChordEvent
         if ((stepA && isConsonantCommonToneInChord (pcB)) || (stepB && isConsonantCommonToneInChord (pcA)))
             return true;
 
+        // オクターブユニゾン（単一ピッチクラス・2音以上）への収束解決（例: G7 -> C2+C3）:
+        // 第3音等が省略されるため、トライトーン構成音の片方（導音 B->C 等）がユニゾン音へ順次解決していれば解決完了とみなす
+        if (subsequentChord.pitchClasses.size() == 1 && subsequentChord.midiNotes.size() >= 2)
+        {
+            if (stepA || stepB)
+                return true;
+        }
+
         return false;
     }
 
