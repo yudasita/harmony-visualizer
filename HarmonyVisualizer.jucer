@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="J5Az4z" name="HarmonyVisualizer" projectType="audioplug"
-              useAppConfig="0" addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1"
-              pluginFormats="buildStandalone,buildVST3" pluginCharacteristicsValue="pluginIsSynth,pluginProducesMidiOut,pluginWantsMidiIn"
+<JUCERPROJECT id="J5Az4z" name="MeLoom" projectType="audioplug" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" pluginFormats="buildStandalone,buildVST3"
+              pluginCharacteristicsValue="pluginIsSynth,pluginProducesMidiOut,pluginWantsMidiIn"
               pluginName="MeLoom" pluginDesc="MeLoom" pluginVST3Category="Analyzer"
               pluginManufacturer="yuda" companyWebsite="yuda.world" bundleIdentifier="world.yuda.MeLoom">
-  <MAINGROUP id="oAMK5W" name="HarmonyVisualizer">
+  <MAINGROUP id="oAMK5W" name="MeLoom">
     <GROUP id="{41034AAA-4FD6-5A51-C0DD-A8F8661143DC}" name="Source">
       <FILE id="UwR0Nm" name="PluginProcessor.cpp" compile="1" resource="0"
             file="Source/PluginProcessor.cpp"/>
@@ -14,11 +14,15 @@
       <FILE id="nKp8dO" name="PluginEditor.cpp" compile="1" resource="0"
             file="Source/PluginEditor.cpp"/>
       <FILE id="P9PzFG" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
-      <FILE id="CbdH01" name="ChordBoundaryDetector.h" compile="0" resource="0" file="Source/ChordBoundaryDetector.h"/>
+      <FILE id="CbdH01" name="ChordBoundaryDetector.h" compile="0" resource="0"
+            file="Source/ChordBoundaryDetector.h"/>
       <FILE id="ChdEv1" name="ChordEvent.h" compile="0" resource="0" file="Source/ChordEvent.h"/>
-      <FILE id="ChdHQ1" name="ChordHistoryQueue.h" compile="0" resource="0" file="Source/ChordHistoryQueue.h"/>
-      <FILE id="PrsPj1" name="PerspectiveProjection.h" compile="0" resource="0" file="Source/PerspectiveProjection.h"/>
-      <FILE id="VcLdS1" name="VoiceLeadingSolver.h" compile="0" resource="0" file="Source/VoiceLeadingSolver.h"/>
+      <FILE id="ChdHQ1" name="ChordHistoryQueue.h" compile="0" resource="0"
+            file="Source/ChordHistoryQueue.h"/>
+      <FILE id="PrsPj1" name="PerspectiveProjection.h" compile="0" resource="0"
+            file="Source/PerspectiveProjection.h"/>
+      <FILE id="VcLdS1" name="VoiceLeadingSolver.h" compile="0" resource="0"
+            file="Source/VoiceLeadingSolver.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>
