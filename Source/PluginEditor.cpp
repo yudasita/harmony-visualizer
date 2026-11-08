@@ -432,14 +432,24 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
 
             if (!isForeground)
             {
-                if (dist == 6) // トライトーン（最大緊張）: 奥に行っても強く残し、グローも付与
+                if (dist == 6) // トライトーン（最大緊張）: ペアごとに未解決なら強く発光を持続、解決済みなら落ち着かせる
                 {
-                    lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.6f);
-                    lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.5f, z, 0.45f);
+                    const bool pairResolved = chord.isTritonePairResolved (idxA, idxB);
+                    if (!pairResolved)
+                    {
+                        lineAlpha = juce::jlimit (0.0f, 1.0f, effectiveAlpha * 1.65f);
+                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.5f, z, 0.45f);
 
-                    // トライトーン用のソフトな発光グロー
-                    g.setColour (pitchLine_colours[6].withMultipliedAlpha (lineAlpha * 0.35f));
-                    g.drawLine (intervalLine, lineThickness * 2.4f);
+                        // 未解決トライトーンペアのソフトな発光グロー
+                        g.setColour (pitchLine_colours[6].withMultipliedAlpha (lineAlpha * 0.38f));
+                        g.drawLine (intervalLine, lineThickness * 2.4f);
+                    }
+                    else
+                    {
+                        // 既に解決したトライトーンペアは発光グローを消し、安定音程に近い落ち着いた輝度へ減衰
+                        lineAlpha = effectiveAlpha * 0.72f;
+                        lineThickness = projection.getProjectedSize (pitchLine_thickness * 1.1f, z, 0.35f);
+                    }
                 }
                 else if (dist == 5) // 半音緊張（短2度/長7度）: やや粘り強く残す
                 {
