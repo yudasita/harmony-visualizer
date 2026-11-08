@@ -164,7 +164,7 @@ private:
     juce::Slider historySizeSlider;
     juce::Slider quantizeWindowSlider;
     juce::Slider arpeggioThresholdSlider;
-    juce::TextButton resetSettingsButton { juce::String::fromUTF8 ("デフォルトに戻す") };
+    juce::TextButton resetSettingsButton { "Reset to Defaults" };
 
     juce::Rectangle<float> drawingArea;
     juce::Point<float> circleCenter;

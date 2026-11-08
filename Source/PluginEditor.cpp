@@ -50,7 +50,7 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
         slider.setVisible (false);
     };
 
-    configureSlider (historySizeSlider, 2.0, 16.0, 1.0, juce::String::fromUTF8 (" 世代"));
+    configureSlider (historySizeSlider, 2.0, 16.0, 1.0, " chords");
     historySizeSlider.onValueChange = [this]()
     {
         const int newSize = static_cast<int> (std::round (historySizeSlider.getValue()));
@@ -152,14 +152,6 @@ void HarmonyVisualizerAudioProcessorEditor::paint (juce::Graphics& g)
     drawPastChordLayers (g);
     drawVoiceLeadingConnections (g);
     drawForegroundChordLayer (g);
-
-#if JUCE_DEBUG || defined(_DEBUG) || defined(DEBUG)
-    // デバッグビルド識別用バッジ（画面最下部にビルド日時を控えめに表示）
-    g.setFont (juce::FontOptions (10.0f));
-    g.setColour (juce::Colours::white.withAlpha (0.35f));
-    const juce::String debugBuildText = "Debug Build: " + juce::String (__DATE__) + " " + juce::String (__TIME__);
-    g.drawText (debugBuildText, getLocalBounds().removeFromBottom (16).reduced (8, 0), juce::Justification::bottomRight, false);
-#endif
 
     // 右上の設定アイコン（歯車ボタン）と設定モーダルオーバーレイの描画
     drawSettingsGearButton (g);
@@ -769,7 +761,7 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
         quantizeWindowSlider.setBounds (contentX, baseTop + rowStep + 18, contentW, 24);
         arpeggioThresholdSlider.setBounds (contentX, baseTop + rowStep * 2 + 18, contentW, 24);
 
-        const int resetBtnW = 116;
+        const int resetBtnW = 128;
         const int resetBtnH = 24;
         const int footerY = static_cast<int> (modalCardBounds.getBottom() - 34.0f);
         resetSettingsButton.setBounds (static_cast<int> (modalCardBounds.getRight() - 16.0f) - resetBtnW,
@@ -845,7 +837,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
                                              26.0f);
     g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
     g.setColour (juce::Colour (0xfff1f5f9).withAlpha (a));
-    g.drawText (juce::String::fromUTF8 ("設定 (Settings)"), headerArea, juce::Justification::centredLeft, false);
+    g.drawText ("Settings", headerArea, juce::Justification::centredLeft, false);
 
     // ヘッダー区切り線
     const float headerLineY = modalCardBounds.getY() + 38.0f;
@@ -876,15 +868,15 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
 
     g.setFont (juce::FontOptions (12.0f));
     g.setColour (juce::Colour (0xffcbd5e1).withAlpha (a));
-    g.drawText (juce::String::fromUTF8 ("履歴表示世代数 (History Generations)"),
+    g.drawText ("History Generations",
                 juce::Rectangle<float> (contentX, baseTop, contentW, 18.0f),
                 juce::Justification::centredLeft, false);
 
-    g.drawText (juce::String::fromUTF8 ("同時打鍵判定窓 (Quantize Window)"),
+    g.drawText ("Quantize Window",
                 juce::Rectangle<float> (contentX, baseTop + rowStep, contentW, 18.0f),
                 juce::Justification::centredLeft, false);
 
-    g.drawText (juce::String::fromUTF8 ("アルペジオ許容時間 (Arpeggio Window)"),
+    g.drawText ("Arpeggio Window",
                 juce::Rectangle<float> (contentX, baseTop + rowStep * 2.0f, contentW, 18.0f),
                 juce::Justification::centredLeft, false);
 
