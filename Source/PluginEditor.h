@@ -17,6 +17,7 @@
 #include "VoiceLeadingSolver.h"
 #include <array>
 #include <vector>
+#include <cmath>
 
 //==============================================================================
 /**
@@ -50,6 +51,70 @@ public:
             ? pitchLine_colours[static_cast<size_t> (dist)]
             : juce::Colours::white;
         return baseColour.withMultipliedAlpha (juce::jlimit (0.0f, 1.0f, depthAlpha));
+    }
+
+    /**
+     * 深度 Z に応じた空気遠近法（Aerial Perspective）のフォグブレンド率（0.0f〜0.88f）を計算
+     * @param z          深度（0.0f = 最前面、正の値 = 奥）
+     * @param resistance 減衰耐性（0.0f = 標準減衰、0.5f〜0.65f = トライトーン等の緊張音程・骨格）
+     */
+    float getAerialFogFactor (float z, float resistance = 0.0f) const noexcept
+    {
+        if (z <= 0.0f)
+            return 0.0f;
+
+        const float maxZ = std::max (1.0f, static_cast<float> (chordHistory.getMaxHistorySize()) * chordHistory.getZSpacing());
+        const float normalizedZ = juce::jlimit (0.0f, 1.0f, z / maxZ);
+
+        // 距離に応じた滑らかな大気減衰カーブ（手前はクリア、中〜奥でスレート背景へ溶け込む）
+        const float baseFog = 1.0f - std::exp (-2.2f * normalizedZ);
+        const float clampedResistance = juce::jlimit (0.0f, 0.85f, resistance);
+
+                return juce::jlimit (0.0f, 0.88f, baseFog * (1.0f - clampedResistance));
+    }
+
+    /**
+     * 深度 Z に応じた被写界深度（Depth of Field）のボケ率（0.0f = ピント合焦、1.0f = 最大ボケ）を計算
+     */
+    float getDepthOfFieldBlurFactor (float z) const noexcept
+    {
+        if (z <= 0.0f)
+            return 0.0f;
+
+        const float maxZ = std::max (1.0f, static_cast<float> (chordHistory.getMaxHistorySize()) * chordHistory.getZSpacing());
+        const float normalizedZ = juce::jlimit (0.0f, 1.0f, z / maxZ);
+
+        // 1世代奥から緩やかにボケ始め、中〜奥で滑らかにピントが外れる光学レンズ特性を近似
+        return juce::jlimit (0.0f, 1.0f, 1.0f - std::exp (-2.6f * normalizedZ));
+    }
+
+    /**
+     * 空気遠近法（彩度低下 ＋ 背景スレートチャコールへの色ブレンド ＋ アルファ減衰）を適用した色を返す
+     * @param baseColour 元の描画色
+     * @param z          深度（0.0f = 最前面）
+     * @param alpha      不透明度（0.0f〜1.0f）
+     * @param resistance 空気遠近に対する耐性（トライトーンやベースラインは奥でも色味・発光を残す）
+     */
+    juce::Colour applyAerialPerspective (juce::Colour baseColour,
+                                         float z,
+                                         float alpha,
+                                         float resistance = 0.0f) const noexcept
+    {
+        const float clampedAlpha = juce::jlimit (0.0f, 1.0f, alpha);
+        if (z <= 0.001f)
+            return baseColour.withMultipliedAlpha (clampedAlpha);
+
+        const float fog = getAerialFogFactor (z, resistance);
+
+        // 1. 奥へ行くほど彩度を落として大気の霞み感を出す
+        const float saturationMultiplier = juce::jlimit (0.20f, 1.0f, 1.0f - fog * 0.58f);
+        const juce::Colour desaturated = baseColour.withMultipliedSaturation (saturationMultiplier);
+
+        // 2. 背景色（スレートチャコール）へ補間してコントラストを減衰させる
+        const float bgBlendRatio = juce::jlimit (0.0f, 0.78f, fog * 0.72f);
+        const juce::Colour fogged = desaturated.interpolatedWith (backgroundColour, bgBlendRatio);
+
+        return fogged.withMultipliedAlpha (clampedAlpha);
     }
 
 private:
