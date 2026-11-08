@@ -70,7 +70,22 @@ public:
         const float baseFog = 1.0f - std::exp (-2.2f * normalizedZ);
         const float clampedResistance = juce::jlimit (0.0f, 0.85f, resistance);
 
-        return juce::jlimit (0.0f, 0.88f, baseFog * (1.0f - clampedResistance));
+                return juce::jlimit (0.0f, 0.88f, baseFog * (1.0f - clampedResistance));
+    }
+
+    /**
+     * 深度 Z に応じた被写界深度（Depth of Field）のボケ率（0.0f = ピント合焦、1.0f = 最大ボケ）を計算
+     */
+    float getDepthOfFieldBlurFactor (float z) const noexcept
+    {
+        if (z <= 0.0f)
+            return 0.0f;
+
+        const float maxZ = std::max (1.0f, static_cast<float> (chordHistory.getMaxHistorySize()) * chordHistory.getZSpacing());
+        const float normalizedZ = juce::jlimit (0.0f, 1.0f, z / maxZ);
+
+        // 1世代奥から緩やかにボケ始め、中〜奥で滑らかにピントが外れる光学レンズ特性を近似
+        return juce::jlimit (0.0f, 1.0f, 1.0f - std::exp (-2.6f * normalizedZ));
     }
 
     /**
