@@ -5,10 +5,11 @@
     MeLoom - ボイスリーディング解析と声部接続ソルバー
 
     直前コード（奥・fromChord）から現在コード（手前・toChord）への遷移における
-    声部連結（ボイスリーディング）の音楽理論的引力・最小移動コストペアリングを計算する。
+    声部連結（ボイスリーディング）の音楽理論的引力・最小移動コストペアリング、
+    および複数世代（最大3世代先）をまたぐ保留（Pending）・世代スキップ解決接続を計算する。
     最低音（ベースライン優先）、共通音（Pivot Note 保持）、トライトーン解決引力、
     導音の上行解決、掛留音（sus4）・テンションの下行解決、近接移動、
-    および多対1の合流マッチングを提供する。
+    および多対1の合流マッチング・不自然な大跳躍の保留制御を提供する。
 
   ==============================================================================
 */
@@ -18,6 +19,7 @@
 #include <JuceHeader.h>
 #include "ChordEvent.h"
 #include <vector>
+#include <deque>
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -46,13 +48,26 @@ struct VoiceLeadingConnection
     int semitoneDistance { 0 };       // toMidiNote - fromMidiNote
     int circleDistance { 0 };         // 五度圏上の最短距離（0〜6）
 
+    // 世代跨ぎ（Generation Skip）接続メタデータ
+    // chords キュー内のインデックス（0 = 最新コード, 1 = 1世代前, 2 = 2世代前...）
+    int fromGenerationIndex { 1 };
+    int toGenerationIndex { 0 };
+    int generationSpan { 1 };         // fromGenerationIndex - toGenerationIndex (1 = 直後コード, 2 = 1世代スキップ, 3 = 2世代スキップ)
+
     VoiceLeadingConnection() = default;
 
-    VoiceLeadingConnection (int fromNote, int toNote, Type connectionType)
+    VoiceLeadingConnection (int fromNote,
+                            int toNote,
+                            Type connectionType,
+                            int fromGenIdx = 1,
+                            int toGenIdx = 0)
         : fromMidiNote (fromNote),
           toMidiNote (toNote),
           type (connectionType),
-          semitoneDistance (toNote - fromNote)
+          semitoneDistance (toNote - fromNote),
+          fromGenerationIndex (fromGenIdx),
+          toGenerationIndex (toGenIdx),
+          generationSpan (std::max (1, fromGenIdx - toGenIdx))
     {
         fromPitchClass = ChordEvent::normalizePitchClass (fromNote);
         fromCircleIndex = ChordEvent::pitchClassToCircleIndex (fromPitchClass);
@@ -63,11 +78,12 @@ struct VoiceLeadingConnection
         circleDistance = ChordEvent::circleDistance (fromCircleIndex, toCircleIndex);
     }
 
-    bool isBassLine() const noexcept          { return type == Type::BassLine; }
-    bool isPivotNote() const noexcept         { return type == Type::PivotNote; }
-    bool isStepwise() const noexcept          { return type == Type::Stepwise; }
-    bool isTritoneResolution() const noexcept { return type == Type::TritoneResolution; }
-    bool isConverged() const noexcept         { return type == Type::Converged; }
+    bool isBassLine() const noexcept           { return type == Type::BassLine; }
+    bool isPivotNote() const noexcept          { return type == Type::PivotNote; }
+    bool isStepwise() const noexcept           { return type == Type::Stepwise; }
+    bool isTritoneResolution() const noexcept  { return type == Type::TritoneResolution; }
+    bool isConverged() const noexcept          { return type == Type::Converged; }
+    bool isSkippedGeneration() const noexcept  { return generationSpan >= 2; }
 
     static juce::String getTypeName (Type t)
     {
@@ -84,7 +100,7 @@ struct VoiceLeadingConnection
 };
 
 /**
-    音楽理論に基づく声部移動コスト・引力ボーナス設定パラメータ
+    音楽理論に基づく声部移動コスト・引力ボーナス・世代スキップ保留設定パラメータ
 */
 struct VoiceLeadingCostParameters
 {
@@ -106,6 +122,14 @@ struct VoiceLeadingCostParameters
     int convergencePenalty           { 45 };  // 同一ターゲット音への多対1合流ペナルティ
     int voiceCrossingPenalty         { 35 };  // 声部交差（順序逆転）に対するソフトペナルティ
     int maxPivotOctaveDistance       { 18 };  // 共通音保持（PivotNote）として優先する最大実ノート距離
+
+    // 世代スキップ・保留（Pending）判定パラメータ
+    int maxConvergedSemitoneDistance { 2 };   // 合流（Converged）を許可する最大ピッチクラス距離（3半音以上の跳躍合流は保留）
+    int maxDirectLeapSemitoneDistance{ 4 };   // 空きターゲットへの直接接続を許可する最大ピッチクラス距離（5半音以上の大跳躍は保留）
+    int maxDirectTransitionCost      { 950 }; // 直接接続を許可する最大遷移コスト閾値
+    int maxGenerationSkipSpan        { 3 };   // 保留ノートの解決を探索する最大世代差（+2世代 = 1世代スキップ, +3世代 = 2世代スキップ）
+    int skipStepMaxSemitoneDistance  { 2 };   // 世代スキップ解決で許可する最大ピッチクラス移動距離（0=保続音, 1〜2=順次解決）
+    int maxSkipOctaveDistance        { 18 };  // 世代スキップ解決で許可する最大実MIDIノート距離
 };
 
 class VoiceLeadingSolver
@@ -113,22 +137,18 @@ class VoiceLeadingSolver
 public:
     using CostParameters = VoiceLeadingCostParameters;
 
+    /** 単一世代ペアの解決結果（接続リスト ＋ 保留された未接続ノート一覧） */
+    struct PairSolveResult
+    {
+        std::vector<VoiceLeadingConnection> connections;
+        std::vector<int> unmatchedFromNotes;
+    };
+
     VoiceLeadingSolver() = default;
 
     /**
         2つのコードイベント（直前コード fromChord → 現在コード toChord）間の
-        声部連結リストを計算する。
-
-        アルゴリズム:
-        1. ルール1 (ベースライン優先):
-           最低音同士 (bassNote) は音程距離に関わらず必ず最優先で接続 (Type::BassLine)。
-        2. ルール2 (共通音の保持 / PivotNote):
-           残りの上声部について、同一ピッチクラスを持つノート同士を最小半音差で平行接続 (Type::PivotNote)。
-           上声部に同一ピッチクラスがない場合でも toBass と同一ピッチクラスであれば保持接続を許可。
-        3. ルール3 (音楽理論的引力コスト関数 ＆ 最適割当):
-           残りの上声部について、半音・全音移動コスト、3半音以上の跳躍ペナルティ、
-           およびトライトーン解決・導音解決・掛留音(sus4)/テンション下行解決の引力ボーナスを含む
-           総合コスト関数を最小化するペアリングを計算。
+        声部連結リストを計算する（既存インターフェース互換）。
     */
     static std::vector<VoiceLeadingConnection> solve (const ChordEvent& fromChord,
                                                       const ChordEvent& toChord)
@@ -140,10 +160,24 @@ public:
                                                       const ChordEvent& toChord,
                                                       const CostParameters& params)
     {
-        std::vector<VoiceLeadingConnection> connections;
+        return solvePairWithPending (fromChord, toChord, 1, 0, params, false).connections;
+    }
+
+    /**
+        直前コードから現在コードへの声部連結を計算し、無理な合流や不自然な大跳躍となる声部を
+        接続せずに保留（unmatchedFromNotes）として返す。
+    */
+    static PairSolveResult solvePairWithPending (const ChordEvent& fromChord,
+                                                 const ChordEvent& toChord,
+                                                 int fromGenIdx = 1,
+                                                 int toGenIdx = 0,
+                                                 const CostParameters& params = CostParameters{},
+                                                 bool enablePendingHold = true)
+    {
+        PairSolveResult result;
 
         if (fromChord.isEmpty() || toChord.isEmpty())
-            return connections;
+            return result;
 
         // ---------------------------------------------------------------------
         // ルール1: ベースライン優先接続
@@ -152,7 +186,11 @@ public:
         const int toBass   = (toChord.bassNote >= 0)   ? toChord.bassNote   : toChord.midiNotes.front();
         const int toBassPc = ChordEvent::normalizePitchClass (toBass);
 
-        connections.emplace_back (fromBass, toBass, VoiceLeadingConnection::Type::BassLine);
+        result.connections.emplace_back (fromBass,
+                                         toBass,
+                                         VoiceLeadingConnection::Type::BassLine,
+                                         fromGenIdx,
+                                         toGenIdx);
 
         // 上声部（最低音を除いた残り）の抽出
         std::vector<int> fromUpper;
@@ -164,7 +202,7 @@ public:
             toUpper.assign (toChord.midiNotes.begin() + 1, toChord.midiNotes.end());
 
         if (fromUpper.empty())
-            return connections;
+            return result;
 
         // ---------------------------------------------------------------------
         // ルール2: 共通音の保持（PivotNote）
@@ -205,9 +243,11 @@ public:
             {
                 fromMatched[cand.fromIdx] = true;
                 toMatched[cand.toIdx] = true;
-                connections.emplace_back (fromUpper[cand.fromIdx],
-                                          toUpper[cand.toIdx],
-                                          VoiceLeadingConnection::Type::PivotNote);
+                result.connections.emplace_back (fromUpper[cand.fromIdx],
+                                                 toUpper[cand.toIdx],
+                                                 VoiceLeadingConnection::Type::PivotNote,
+                                                 fromGenIdx,
+                                                 toGenIdx);
             }
         }
 
@@ -220,15 +260,17 @@ public:
                 if (dist <= params.maxPivotOctaveDistance)
                 {
                     fromMatched[i] = true;
-                    connections.emplace_back (fromUpper[i],
-                                              toBass,
-                                              VoiceLeadingConnection::Type::PivotNote);
+                    result.connections.emplace_back (fromUpper[i],
+                                                     toBass,
+                                                     VoiceLeadingConnection::Type::PivotNote,
+                                                     fromGenIdx,
+                                                     toGenIdx);
                 }
             }
         }
 
         // ---------------------------------------------------------------------
-        // ルール3: 音楽的引力コスト関数による最適ペアリング ＆ 合流制御
+        // ルール3: 音楽的引力コスト関数による最適ペアリング ＆ 保留（Pending）制御
         // ---------------------------------------------------------------------
         std::vector<int> remFrom;
         for (size_t i = 0; i < fromUpper.size(); ++i)
@@ -236,7 +278,7 @@ public:
                 remFrom.push_back (fromUpper[i]);
 
         if (remFrom.empty())
-            return connections;
+            return result;
 
         // ターゲット候補リストの構築（toChord の各構成音）
         struct TargetCandidate
@@ -365,7 +407,7 @@ public:
             }
         }
 
-        // 接続種別（TritoneResolution / Stepwise / Converged）の決定
+        // 各ターゲット候補に対して最も低コストで到達する主声部（primaryVoice）を特定
         std::vector<int> assignedCountPerCand (C, 0);
         std::vector<size_t> primaryVoiceForCand (C, M);
 
@@ -385,22 +427,198 @@ public:
             const int fromNote = remFrom[i];
             const int toNote   = candidates[c].midiNote;
             const int absPcDist = std::abs (signedPitchClassDelta (fromNote, toNote));
+            const int cost = pairCosts[i][c];
+
+            const bool isSecondaryVoice = (primaryVoiceForCand[c] != i);
+            const bool targetAlreadyOccupied = (candidates[c].initialUsageCount > 0) || isSecondaryVoice;
+            const bool isTritoneStep = isTritonePitchClassInChord (fromNote, fromChord) && absPcDist >= 1 && absPcDist <= 2;
+
+            // 保留（Pending）判定:
+            // 1. 既に他声部で占有されているターゲットへの合流（Converged）であり、かつ3半音以上の跳躍を伴う場合
+            // 2. 複数声部が同一ターゲットへ殺到する二次声部（isSecondaryVoice）であり、トライトーン解決ではなく2半音以上離れている場合
+            // 3. 空きターゲットであっても、極端な大跳躍（5半音以上、またはコスト閾値超過）となる場合
+            if (enablePendingHold && !isTritoneStep)
+            {
+                const bool forcedDistantConvergence =
+                    targetAlreadyOccupied && (absPcDist > params.maxConvergedSemitoneDistance);
+                const bool redundantWholeStepConvergence =
+                    isSecondaryVoice && (absPcDist >= 2);
+                const bool excessiveDirectLeap =
+                    (absPcDist > params.maxDirectLeapSemitoneDistance) || (cost > params.maxDirectTransitionCost);
+
+                if (forcedDistantConvergence || redundantWholeStepConvergence || excessiveDirectLeap)
+                {
+                    result.unmatchedFromNotes.push_back (fromNote);
+                    continue;
+                }
+            }
 
             VoiceLeadingConnection::Type connType = VoiceLeadingConnection::Type::Stepwise;
 
-            if (isTritonePitchClassInChord (fromNote, fromChord) && absPcDist >= 1 && absPcDist <= 2)
+            if (isTritoneStep)
             {
                 connType = VoiceLeadingConnection::Type::TritoneResolution;
             }
-            else if (primaryVoiceForCand[c] != i || (candidates[c].initialUsageCount > 0 && absPcDist > 2))
+            else if (isSecondaryVoice || (candidates[c].initialUsageCount > 0 && absPcDist > 2))
             {
                 connType = VoiceLeadingConnection::Type::Converged;
             }
 
-            connections.emplace_back (fromNote, toNote, connType);
+            result.connections.emplace_back (fromNote, toNote, connType, fromGenIdx, toGenIdx);
         }
 
-        return connections;
+        return result;
+    }
+
+    /**
+        コード履歴キュー全体（chords[0] = 最新コード, chords[1] = 1世代前 ...）を受け取り、
+        隣接世代間の声部連結と、保留（Pending）された声部の世代スキップ解決接続（最大3世代先: span=2, 3）を
+        一括計算して返す。
+
+        仕様方針:
+        - 直後コード（span=1）に自然な解決先がない声部は無理に合流・大跳躍させず保留（Pending）とする。
+        - 保留された声部は、次の世代（+2世代 = 1世代スキップ）またはその次の世代（+3世代 = 2世代スキップ）に
+          自然な解決先（共通音保持 PivotNote、トライトーン解決、半音・全音の順次進行 Stepwise）が現れた時点で、
+          中間世代をスキップして直接結ぶ `VoiceLeadingConnection`（generationSpan = 2 or 3）を生成する。
+        - 解決先がまだ現れていない間は線を描画せず保留待機とする。
+    */
+    static std::vector<VoiceLeadingConnection> solveMultiGeneration (
+        const std::deque<ChordEvent>& chords,
+        const CostParameters& params = CostParameters{})
+    {
+        std::vector<VoiceLeadingConnection> allConnections;
+        if (chords.size() <= 1)
+            return allConnections;
+
+        const size_t numChords = chords.size();
+
+        // 各世代 chordIdx において、直前世代（chordIdx + 1）からの直接接続によって
+        // 既に占有されたピッチクラスマスクと実ノート使用状況を記録する
+        std::vector<uint16_t> occupiedPcMaskAtGen (numChords, 0);
+        std::vector<std::vector<int>> pendingNotesAtGen (numChords);
+
+        // 1. まず最も奥の世代から手前へ向かって隣接世代（fromIdx -> fromIdx - 1）を解決し、
+        //    無理な合流・大跳躍を抑制して保留ノート（pendingNotesAtGen[fromIdx]）を抽出する
+        for (size_t fromIdx = numChords - 1; fromIdx >= 1; --fromIdx)
+        {
+            const size_t toIdx = fromIdx - 1;
+            const auto& fromChord = chords[fromIdx];
+            const auto& toChord   = chords[toIdx];
+
+            if (fromChord.isEmpty() || toChord.isEmpty())
+                continue;
+
+            auto pairRes = solvePairWithPending (fromChord,
+                                                 toChord,
+                                                 static_cast<int> (fromIdx),
+                                                 static_cast<int> (toIdx),
+                                                 params,
+                                                 true);
+
+            for (const auto& conn : pairRes.connections)
+            {
+                if (conn.toPitchClass >= 0 && conn.toPitchClass < 12)
+                    occupiedPcMaskAtGen[toIdx] |= static_cast<uint16_t> (1u << conn.toPitchClass);
+                allConnections.push_back (conn);
+            }
+
+            pendingNotesAtGen[fromIdx] = std::move (pairRes.unmatchedFromNotes);
+        }
+
+        // 2. 各世代 fromIdx で保留（Pending）となったノートについて、
+        //    2世代先（span = 2: fromIdx - 2）〜 最大 maxGenerationSkipSpan 世代先（span = 3: fromIdx - 3）を順に探索し、
+        //    自然な解決先が見つかれば世代スキップ接続を生成する
+        const int maxSpan = std::max (2, params.maxGenerationSkipSpan);
+
+        for (size_t fromIdx = numChords - 1; fromIdx >= 2; --fromIdx)
+        {
+            const auto& pendingNotes = pendingNotesAtGen[fromIdx];
+            if (pendingNotes.empty())
+                continue;
+
+            const auto& fromChord = chords[fromIdx];
+
+            for (int pendingNote : pendingNotes)
+            {
+                const int fromPc = ChordEvent::normalizePitchClass (pendingNote);
+
+                // 最も近い解決世代（span = 2, 次に span = 3）を優先して探索
+                for (int span = 2; span <= maxSpan; ++span)
+                {
+                    if (fromIdx < static_cast<size_t> (span))
+                        break;
+
+                    const size_t targetIdx = fromIdx - static_cast<size_t> (span);
+                    const auto& targetChord = chords[targetIdx];
+                    if (targetChord.isEmpty())
+                        continue;
+
+                    int bestTargetNote = -1;
+                    int bestScore = std::numeric_limits<int>::max() / 2;
+                    VoiceLeadingConnection::Type bestType = VoiceLeadingConnection::Type::Stepwise;
+
+                    for (int candNote : targetChord.midiNotes)
+                    {
+                        const int candPc = ChordEvent::normalizePitchClass (candNote);
+                        const int deltaPc = signedPitchClassDelta (pendingNote, candNote);
+                        const int absPc   = std::abs (deltaPc);
+                        const int octDist = std::abs (candNote - pendingNote);
+
+                        // 世代スキップ解決は保続音（absPc == 0）または半音・全音の順次解決（absPc <= 2）に限定し、
+                        // 世代を跨いだ不自然な大跳躍は行わない
+                        if (absPc > params.skipStepMaxSemitoneDistance || octDist > params.maxSkipOctaveDistance)
+                            continue;
+
+                        int score = evaluatePairCost (pendingNote, candNote, fromChord, targetChord, params);
+
+                        // ターゲット世代でまだ直前世代の声部から占有されていない空き構成音であれば優先ボーナス
+                        const bool isUnoccupiedInTarget =
+                            ((occupiedPcMaskAtGen[targetIdx] & (1u << candPc)) == 0);
+                        if (isUnoccupiedInTarget)
+                            score -= 65;
+
+                        // 保続音（PivotNote）の世代スキップ再結合を強く優遇
+                        if (absPc == 0 && fromPc == candPc)
+                            score -= 90;
+
+                        if (score < bestScore)
+                        {
+                            bestScore = score;
+                            bestTargetNote = candNote;
+
+                            if (absPc == 0)
+                            {
+                                bestType = VoiceLeadingConnection::Type::PivotNote;
+                            }
+                            else if (isTritonePitchClassInChord (pendingNote, fromChord) && absPc >= 1 && absPc <= 2)
+                            {
+                                bestType = VoiceLeadingConnection::Type::TritoneResolution;
+                            }
+                            else
+                            {
+                                bestType = VoiceLeadingConnection::Type::Stepwise;
+                            }
+                        }
+                    }
+
+                    // 自然な解決先が見つかった場合、その世代へ世代スキップ接続を張り、以降の探索を終了
+                    if (bestTargetNote >= 0)
+                    {
+                        const int resolvedPc = ChordEvent::normalizePitchClass (bestTargetNote);
+                        occupiedPcMaskAtGen[targetIdx] |= static_cast<uint16_t> (1u << resolvedPc);
+
+                        allConnections.emplace_back (pendingNote,
+                                                     bestTargetNote,
+                                                     bestType,
+                                                     static_cast<int> (fromIdx),
+                                                     static_cast<int> (targetIdx));
+                        break;
+                    }
+                }
+            }
+        }
+
+        return allConnections;
     }
 
     /**
