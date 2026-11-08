@@ -30,7 +30,7 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
     });
 
     startTimerHz (60);
-    setResizable (true, true);
+    setResizable (true, false);
     setResizeLimits (300, 300, 1000, 1000);
 }
 
