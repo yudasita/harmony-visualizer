@@ -1,6 +1,6 @@
-# HarmonyVisualizer
+# ChordWeaver
 
-**HarmonyVisualizer** は、MIDI 入力された和音・単音を五度圏（Circle of Fifths）上に配置し、リアルタイムに幾何学的な図形として可視化するオーディオプラグイン／スタンドアロンアプリケーションです。
+**ChordWeaver** は、MIDI 入力された和音・単音を五度圏（Circle of Fifths）上に配置し、リアルタイムに幾何学的な図形として可視化するオーディオプラグイン／スタンドアロンアプリケーションです。
 
 従来のコードネーム表示に依存せず、ピッチクラス間のインターバル距離や和音の幾何学的対称性を直感的に把握できます。
 
@@ -38,7 +38,7 @@ xcodebuild -project Builds/MacOSX/HarmonyVisualizer.xcodeproj \
   -configuration Debug build
 
 # アプリの起動
-open "Builds/MacOSX/build/Debug/HarmonyVisualizer(Debug).app"
+open "Builds/MacOSX/build/Debug/ChordWeaver(Debug).app"
 ```
 
 ### 2. VST3 プラグインのビルド

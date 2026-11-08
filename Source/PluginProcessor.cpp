@@ -31,7 +31,11 @@ HarmonyVisualizerAudioProcessor::~HarmonyVisualizerAudioProcessor()
 //==============================================================================
 const juce::String HarmonyVisualizerAudioProcessor::getName() const
 {
+   #ifdef JucePlugin_Name
     return JucePlugin_Name;
+   #else
+    return "ChordWeaver";
+   #endif
 }
 
 bool HarmonyVisualizerAudioProcessor::acceptsMidi() const

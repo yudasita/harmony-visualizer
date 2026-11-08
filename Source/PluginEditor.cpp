@@ -909,7 +909,7 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
                                               28.0f);
     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
     g.setColour (juce::Colour (0xff94a3b8).withAlpha (a));
-    const juce::String versionTitle = "HarmonyVisualizer v" + juce::String (ProjectInfo::versionString);
+    const juce::String versionTitle = "ChordWeaver v" + juce::String (ProjectInfo::versionString);
     g.drawText (versionTitle, aboutBounds.withHeight (14.0f), juce::Justification::centredLeft, false);
 
     g.setFont (juce::FontOptions (9.5f));
