@@ -367,8 +367,10 @@ private:
             // 新規コードの開始：過去の古い蓄積をクリアし、現在押さえている音から再蓄積
             accumulatedNotes = currentlyHeldNotes;
             pedalReleasedSinceLastChord = false;
-            hasActiveCommittedChord = false;
-            isBuildingInitialChord = true;
+            if (!hasActiveCommittedChord)
+            {
+                isBuildingInitialChord = true;
+            }
             isNewChordStrike = true;
         }
         else
@@ -543,6 +545,43 @@ private:
         const int numNewNotes = static_cast<int> (notesInCurrentWindow.size());
         const int singleNewNote = (numNewNotes == 1) ? notesInCurrentWindow.front() : -1;
 
+        int melodyCandidateNote = singleNewNote;
+        if (numNewNotes > 1 && hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3)
+        {
+            std::vector<int> sortedWindowNotes = notesInCurrentWindow;
+            std::sort (sortedWindowNotes.begin(), sortedWindowNotes.end());
+
+            const int potentialTopNote = sortedWindowNotes.back();
+            const int potentialBassNote = sortedWindowNotes.front();
+            const int currentBass = currentState.notes.front();
+
+            const bool sameBassPc = (((potentialBassNote % 12) + 12) % 12) == (((currentBass % 12) + 12) % 12);
+            const bool bassNotLower = (potentialBassNote >= currentBass);
+
+            if (sameBassPc && bassNotLower)
+            {
+                bool lowerNotesMatchAccompaniment = true;
+                std::set<int> currentPcs;
+                for (int n : currentState.notes)
+                    currentPcs.insert (((n % 12) + 12) % 12);
+
+                for (size_t i = 0; i + 1 < sortedWindowNotes.size(); ++i)
+                {
+                    const int pc = ((sortedWindowNotes[i] % 12) + 12) % 12;
+                    if (currentPcs.find (pc) == currentPcs.end())
+                    {
+                        lowerNotesMatchAccompaniment = false;
+                        break;
+                    }
+                }
+
+                if (lowerNotesMatchAccompaniment && potentialTopNote > potentialBassNote)
+                {
+                    melodyCandidateNote = potentialTopNote;
+                }
+            }
+        }
+
         // 最低音数フィルタ: ピッチクラス数が minNotesForChord 未満の場合はコードとして確定しない
         // （単音演奏時は外周リングの soundingNotes のみ点灯させ、コード履歴キューへは送らない）
         std::set<int> uniquePitchClasses;
@@ -573,12 +612,12 @@ private:
         // 以下の全条件を満たす場合のみメロディ・経過音判定を実施する:
         // 1. 和音構築（アルペジオ）フェーズが完了していること（!isBuildingInitialChord）
         // 2. 既に伴奏コードが3音以上（三和音以上）で確立していること（currentState.notes.size() >= 3）
-        // 3. 今回の窓での打鍵が単音であること（numNewNotes == 1）
+        // 3. メロディ候補音（単音打鍵、または伴奏維持での最高音移動）が存在すること（melodyCandidateNote >= 0）
         // 4. 最前面にアクティブなコードが存在すること（hasActiveCommittedChord）
         // =========================================================================
-        if (hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3 && numNewNotes == 1)
+        if (hasActiveCommittedChord && !isBuildingInitialChord && currentState.notes.size() >= 3 && melodyCandidateNote >= 0)
         {
-            const int newNote = singleNewNote;
+            const int newNote = melodyCandidateNote;
             const int currentBass = currentState.notes.front();
             const int prevTop = (lastTopNote > 0 && (currentTimeMs - lastTopNoteTimeMs) <= melodyStepThresholdMs)
                                     ? lastTopNote
@@ -722,7 +761,7 @@ private:
             lastTopNoteTimeMs = currentTimeMs;
         }
 
-        if (isDifferentChord || isNewChordStrike)
+        if (isDifferentChord)
         {
             if (hasActiveCommittedChord && isSubsetGrowth && !isNewChordStrike)
             {
