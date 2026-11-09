@@ -606,7 +606,6 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
 
     const float defaultLineThickness = projection.getProjectedSize (pitchLine_thickness, z, 0.3f);
     const float ptRadius = projection.getProjectedSize (pitchPoint_radius, z, 0.35f);
-    const float ptDiameter = ptRadius * 2.0f;
 
     // 3. 構成音間のインターバル線と頂点ポイントを透視投影座標＋空気遠近法で描画
     // 安定音程（dist=1..4）は奥へ行くほど霞んで背景に溶け込み、
