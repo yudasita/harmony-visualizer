@@ -164,6 +164,13 @@ private:
     juce::Slider historySizeSlider;
     juce::Slider quantizeWindowSlider;
     juce::Slider arpeggioThresholdSlider;
+
+    juce::ToggleButton showVoiceLeadingToggle { "Voice Leading Lines" };
+    juce::ToggleButton showPastChordsToggle { "Past Chord Tunnel" };
+    juce::ToggleButton showGuidesToggle { "Background Guides" };
+    juce::ToggleButton showNoteNamesToggle { "Note Name Labels" };
+    juce::ToggleButton showGuideDotsToggle { "12 Guide Dots" };
+
     juce::TextButton resetSettingsButton { "Reset to Defaults" };
 
     juce::Rectangle<float> drawingArea;
