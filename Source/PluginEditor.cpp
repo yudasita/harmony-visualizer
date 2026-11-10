@@ -279,11 +279,162 @@ void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::G
         }
     };
 
+    // 0. インターバル・サーフェス（光膜リボン）を最下層として描画
+    drawIntervalSurfaces (g, connections);
+
     // 1. 一般声部（PivotNote / Stepwise / Converged / TritoneResolution、世代スキップを含む）を奥から順に描画
     renderPass (false);
 
     // 2. ベースライン（骨格）をその上に重ねて描画（奥に行っても他よりしっかり残る減衰率）
     renderPass (true);
+}
+
+void HarmonyVisualizerAudioProcessorEditor::drawIntervalSurfaces (
+    juce::Graphics& g,
+    const std::vector<VoiceLeadingConnection>& connections)
+{
+    const auto& chords = chordHistory.getChords();
+    if (chords.size() <= 1 || connections.empty())
+        return;
+
+    // 世代遷移ペア（同一の fromGenerationIndex, toGenerationIndex を持つ接続）ごとにグループ化
+    struct TransitionKey
+    {
+        int fromIdx;
+        int toIdx;
+        bool operator< (const TransitionKey& o) const noexcept
+        {
+            if (fromIdx != o.fromIdx)
+                return fromIdx < o.fromIdx;
+            return toIdx < o.toIdx;
+        }
+    };
+
+    std::map<TransitionKey, std::vector<VoiceLeadingConnection>> genGroups;
+    for (const auto& conn : connections)
+    {
+        // 世代スキップが大きすぎる（2世代超え）接続は、空間が過密になるのを防ぐためサーフェス対象から除外
+        if (conn.generationSpan > 2)
+            continue;
+
+        genGroups[{ conn.fromGenerationIndex, conn.toGenerationIndex }].push_back (conn);
+    }
+
+    // 各世代遷移グループごとにインターバル光膜サーフェスを構築・描画
+    for (auto& [key, group] : genGroups)
+    {
+        const int fromIdx = key.fromIdx;
+        const int toIdx   = key.toIdx;
+
+        if (fromIdx < 0 || toIdx < 0
+            || static_cast<size_t> (fromIdx) >= chords.size()
+            || static_cast<size_t> (toIdx)   >= chords.size())
+        {
+            continue;
+        }
+
+        const auto& fromChord = chords[static_cast<size_t> (fromIdx)];
+        const auto& toChord   = chords[static_cast<size_t> (toIdx)];
+        if (fromChord.isEmpty() || toChord.isEmpty() || group.size() < 2)
+            continue;
+
+        // ノート番号でソート（低音から高音へ規則正しく整列）
+        std::sort (group.begin(), group.end(), [] (const VoiceLeadingConnection& a, const VoiceLeadingConnection& b)
+        {
+            return a.toMidiNote < b.toMidiNote;
+        });
+
+        const float fromZ = fromChord.zPosition;
+        const float toZ   = (toIdx == 0) ? 0.0f : toChord.zPosition;
+        const bool isLatestTransition = (toIdx == 0);
+
+        // 深度減衰（奥の世代遷移ほどオーロラ光膜は大気中に昇華・蒸発する）
+        const float genDamp = isLatestTransition ? 1.0f : std::max (0.0f, 0.50f - 0.16f * static_cast<float> (toIdx));
+        if (genDamp <= 0.01f)
+            continue;
+
+        // リボンペアの構築:
+        // 1. 隣接声部ペア (i, i+1): 声部間の並行移動・開閉・反行を普遍的に可視化
+        // 2. トライトーン解決ペア: 緊張解決のくさび形面を優先抽出
+        struct RibbonPair
+        {
+            size_t idxA;
+            size_t idxB;
+            bool isTritone;
+        };
+        std::vector<RibbonPair> pairs;
+
+        for (size_t i = 0; i + 1 < group.size(); ++i)
+        {
+            const bool isTri = group[i].isTritoneResolution() || group[i + 1].isTritoneResolution();
+            pairs.push_back ({ i, i + 1, isTri });
+        }
+
+        // 非隣接のトライトーン解決ペアがあれば追加
+        for (size_t i = 0; i < group.size(); ++i)
+        {
+            for (size_t j = i + 2; j < group.size(); ++j)
+            {
+                if (group[i].isTritoneResolution() && group[j].isTritoneResolution())
+                    pairs.push_back ({ i, j, true });
+            }
+        }
+
+        for (const auto& rp : pairs)
+        {
+            const auto& connA = group[rp.idxA];
+            const auto& connB = group[rp.idxB];
+
+            // 4頂点の透視投影座標を計算
+            // P1: from A, P2: from B, P3: to B, P4: to A
+            const juce::Point<float> p1 = projection.projectCircleIndex (connA.fromCircleIndex, fromZ, 1.0f);
+            const juce::Point<float> p2 = projection.projectCircleIndex (connB.fromCircleIndex, fromZ, 1.0f);
+            const juce::Point<float> p3 = projection.projectCircleIndex (connB.toCircleIndex,   toZ,   1.0f);
+            const juce::Point<float> p4 = projection.projectCircleIndex (connA.toCircleIndex,   toZ,   1.0f);
+
+            // 4頂点メッシュ / パス（Curved Ribbon Quad）の構築
+            juce::Path ribbonPath;
+            ribbonPath.startNewSubPath (p1);
+            ribbonPath.lineTo (p2);
+            ribbonPath.lineTo (p3);
+            ribbonPath.lineTo (p4);
+            ribbonPath.closeSubPath();
+
+            // 始点側中点・終点側中点
+            juce::Point<float> midFrom = (p1 + p2) * 0.5f;
+            juce::Point<float> midTo   = (p3 + p4) * 0.5f;
+
+            if (midFrom.getDistanceFrom (midTo) < 1.0f)
+                midTo.y += 1.5f; // グラデーションの同一点ゼロ除算回避ガード
+
+            // 始点・終点それぞれの音程（五度圏距離）に応じたインターバルカラーを算出
+            const int distFrom = ChordEvent::circleDistance (connA.fromCircleIndex, connB.fromCircleIndex);
+            const int distTo   = ChordEvent::circleDistance (connA.toCircleIndex,   connB.toCircleIndex);
+
+            const juce::Colour colFrom = getIntervalColour (distFrom);
+            const juce::Colour colTo   = getIntervalColour (distTo);
+
+            // 奥のコード多角形やボイスリーディング線を邪魔しない極薄オーロラ光膜（不透明度 5%〜12%）
+            const float baseSurfaceAlpha = rp.isTritone ? 0.11f : 0.075f;
+            const float surfaceAlphaFrom = baseSurfaceAlpha * genDamp * fromChord.alpha;
+            const float surfaceAlphaTo   = baseSurfaceAlpha * genDamp * (isLatestTransition ? 1.0f : toChord.alpha);
+
+            // 空気遠近法（大気減衰・彩度低下・背景ブレンド）を適用
+            const juce::Colour finalColFrom = applyAerialPerspective (
+                colFrom, fromZ, surfaceAlphaFrom, rp.isTritone ? 0.45f : 0.0f);
+            const juce::Colour finalColTo   = applyAerialPerspective (
+                colTo,   toZ,   surfaceAlphaTo,   rp.isTritone ? 0.45f : 0.0f);
+
+            // 始点インターバル色から終点インターバル色へのなめらかな光彩グラデーション
+            juce::ColourGradient ribbonGrad (
+                finalColFrom, midFrom.x, midFrom.y,
+                finalColTo,   midTo.x,   midTo.y,
+                false);
+
+            g.setGradientFill (ribbonGrad);
+            g.fillPath (ribbonPath);
+        }
+    }
 }
 
 void HarmonyVisualizerAudioProcessorEditor::drawSingleVoiceLeadingThread (
