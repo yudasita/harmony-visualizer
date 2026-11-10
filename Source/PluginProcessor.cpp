@@ -266,11 +266,71 @@ void HarmonyVisualizerAudioProcessor::setArpeggioThresholdMs (double ms)
     settingsRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+bool HarmonyVisualizerAudioProcessor::getShowVoiceLeading() const noexcept
+{
+    return static_cast<bool> (settingsState.getProperty ("showVoiceLeading", defaultShowVoiceLeading));
+}
+
+void HarmonyVisualizerAudioProcessor::setShowVoiceLeading (bool show)
+{
+    settingsState.setProperty ("showVoiceLeading", show, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+bool HarmonyVisualizerAudioProcessor::getShowPastChords() const noexcept
+{
+    return static_cast<bool> (settingsState.getProperty ("showPastChords", defaultShowPastChords));
+}
+
+void HarmonyVisualizerAudioProcessor::setShowPastChords (bool show)
+{
+    settingsState.setProperty ("showPastChords", show, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+bool HarmonyVisualizerAudioProcessor::getShowGuides() const noexcept
+{
+    return static_cast<bool> (settingsState.getProperty ("showGuides", defaultShowGuides));
+}
+
+void HarmonyVisualizerAudioProcessor::setShowGuides (bool show)
+{
+    settingsState.setProperty ("showGuides", show, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+bool HarmonyVisualizerAudioProcessor::getShowNoteNames() const noexcept
+{
+    return static_cast<bool> (settingsState.getProperty ("showNoteNames", defaultShowNoteNames));
+}
+
+void HarmonyVisualizerAudioProcessor::setShowNoteNames (bool show)
+{
+    settingsState.setProperty ("showNoteNames", show, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+bool HarmonyVisualizerAudioProcessor::getShowGuideDots() const noexcept
+{
+    return static_cast<bool> (settingsState.getProperty ("showGuideDots", defaultShowGuideDots));
+}
+
+void HarmonyVisualizerAudioProcessor::setShowGuideDots (bool show)
+{
+    settingsState.setProperty ("showGuideDots", show, nullptr);
+    settingsRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
 void HarmonyVisualizerAudioProcessor::resetSettingsToDefaults()
 {
     settingsState.setProperty ("maxHistorySize", defaultMaxHistorySize, nullptr);
     settingsState.setProperty ("quantizeWindowMs", defaultQuantizeWindowMs, nullptr);
     settingsState.setProperty ("arpeggioThresholdMs", defaultArpeggioThresholdMs, nullptr);
+    settingsState.setProperty ("showVoiceLeading", defaultShowVoiceLeading, nullptr);
+    settingsState.setProperty ("showPastChords", defaultShowPastChords, nullptr);
+    settingsState.setProperty ("showGuides", defaultShowGuides, nullptr);
+    settingsState.setProperty ("showNoteNames", defaultShowNoteNames, nullptr);
+    settingsState.setProperty ("showGuideDots", defaultShowGuideDots, nullptr);
     settingsRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
@@ -293,6 +353,11 @@ void HarmonyVisualizerAudioProcessor::setStateInformation (const void* data, int
                 setMaxHistorySize (static_cast<int> (restored.getProperty ("maxHistorySize", defaultMaxHistorySize)));
                 setQuantizeWindowMs (static_cast<double> (restored.getProperty ("quantizeWindowMs", defaultQuantizeWindowMs)));
                 setArpeggioThresholdMs (static_cast<double> (restored.getProperty ("arpeggioThresholdMs", defaultArpeggioThresholdMs)));
+                setShowVoiceLeading (static_cast<bool> (restored.getProperty ("showVoiceLeading", defaultShowVoiceLeading)));
+                setShowPastChords (static_cast<bool> (restored.getProperty ("showPastChords", defaultShowPastChords)));
+                setShowGuides (static_cast<bool> (restored.getProperty ("showGuides", defaultShowGuides)));
+                setShowNoteNames (static_cast<bool> (restored.getProperty ("showNoteNames", defaultShowNoteNames)));
+                setShowGuideDots (static_cast<bool> (restored.getProperty ("showGuideDots", defaultShowGuideDots)));
             }
         }
     }

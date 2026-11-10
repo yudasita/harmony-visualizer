@@ -75,6 +75,26 @@ HarmonyVisualizerAudioProcessorEditor::HarmonyVisualizerAudioProcessorEditor (Ha
         lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
     };
 
+    auto configureToggle = [this] (juce::ToggleButton& toggle, auto setter)
+    {
+        toggle.setColour (juce::ToggleButton::textColourId, juce::Colour (0xffcbd5e1));
+        toggle.setColour (juce::ToggleButton::tickColourId, juce::Colour (0xff38bdf8));
+        toggle.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colour (0xff475569));
+        toggle.onClick = [this, &toggle, setter]()
+        {
+            (audioProcessor.*setter) (toggle.getToggleState());
+            lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
+            repaint();
+        };
+        addChildComponent (toggle);
+    };
+
+    configureToggle (showVoiceLeadingToggle, &HarmonyVisualizerAudioProcessor::setShowVoiceLeading);
+    configureToggle (showPastChordsToggle, &HarmonyVisualizerAudioProcessor::setShowPastChords);
+    configureToggle (showGuidesToggle, &HarmonyVisualizerAudioProcessor::setShowGuides);
+    configureToggle (showNoteNamesToggle, &HarmonyVisualizerAudioProcessor::setShowNoteNames);
+    configureToggle (showGuideDotsToggle, &HarmonyVisualizerAudioProcessor::setShowGuideDots);
+
     resetSettingsButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff242c3d));
     resetSettingsButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff334155));
     resetSettingsButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffcbd5e1));
@@ -166,6 +186,9 @@ void HarmonyVisualizerAudioProcessorEditor::paintOverChildren (juce::Graphics& g
 
 void HarmonyVisualizerAudioProcessorEditor::drawBackgroundGuides (juce::Graphics& g)
 {
+    if (!audioProcessor.getShowGuides())
+        return;
+
     // 中心クロスヘア（消失点目盛）＆ガイドドット
     g.setColour (guideGridColour);
     const float crossLength = circleRadius * 0.06f;
@@ -178,6 +201,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawBackgroundGuides (juce::Graphics
 
 void HarmonyVisualizerAudioProcessorEditor::drawPastChordLayers (juce::Graphics& g)
 {
+    if (!audioProcessor.getShowPastChords())
+        return;
+
     const auto& chords = chordHistory.getChords();
     if (chords.size() <= 1)
         return;
@@ -196,6 +222,9 @@ void HarmonyVisualizerAudioProcessorEditor::drawPastChordLayers (juce::Graphics&
 
 void HarmonyVisualizerAudioProcessorEditor::drawVoiceLeadingConnections (juce::Graphics& g)
 {
+    if (!audioProcessor.getShowVoiceLeading())
+        return;
+
     const auto& chords = chordHistory.getChords();
     if (chords.size() <= 1)
         return;
@@ -493,57 +522,61 @@ void HarmonyVisualizerAudioProcessorEditor::drawForegroundChordLayer (juce::Grap
     drawChordRingAndPolygon (g, foregroundChord, alphaMultiplier, true);
 
     // 最前面（Z=0）の外周12音名ラベルを描画（中央テキストは廃止し3Dタイムトンネルの消失点視認性を確保）
-    const juce::Font regularFont (juce::FontOptions (labelCircle_fontsize, juce::Font::plain));
-    const juce::Font boldFont    (juce::FontOptions (labelCircle_fontsize * 1.06f, juce::Font::bold));
-
-    for (int i = 0; i < 12; ++i)
+    if (audioProcessor.getShowNoteNames())
     {
-        const auto p = projection.projectCircleIndex (i, 0.0f, 1.1f);
-        const bool isInChord  = foregroundChord.hasCircleIndex (i);
-        const bool isSounding = chordDetector.isCircleIndexSounding (i);
-        const bool isBass     = (i == foregroundChord.bassCircleIndex);
+        const juce::Font regularFont (juce::FontOptions (labelCircle_fontsize, juce::Font::plain));
+        const juce::Font boldFont    (juce::FontOptions (labelCircle_fontsize * 1.06f, juce::Font::bold));
 
-        const juce::Rectangle<float> labelBounds (p.x - labelCircle_size * 0.5f,
-                                                 p.y - labelCircle_size * 0.5f,
-                                                 labelCircle_size,
-                                                 labelCircle_size);
-
-        if (isSounding)
+        for (int i = 0; i < 12; ++i)
         {
-            // 現在押鍵中（またはペダル保持中）のアクティブ音：ネオングロー＋太字ハイライト
-            const juce::Colour glowBase = isBass ? pointColour_root : juce::Colour (0xff38bdf8);
+            const auto p = projection.projectCircleIndex (i, 0.0f, 1.1f);
+            const bool isInChord  = foregroundChord.hasCircleIndex (i);
+            const bool isSounding = chordDetector.isCircleIndexSounding (i);
+            const bool isBass     = (i == foregroundChord.bassCircleIndex);
 
-            // 外周ソフトネオングロー（ラジアルグラデーション）
-            const float glowRadius = labelCircle_size * 0.62f;
-            juce::ColourGradient labelGlow (
-                glowBase.withAlpha (0.36f), p.x, p.y,
-                glowBase.withAlpha (0.0f),  p.x + glowRadius, p.y,
-                true);
-            labelGlow.addColour (0.45, glowBase.withAlpha (0.16f));
-            g.setGradientFill (labelGlow);
-            g.fillEllipse (p.x - glowRadius, p.y - glowRadius, glowRadius * 2.0f, glowRadius * 2.0f);
+            const juce::Rectangle<float> labelBounds (p.x - labelCircle_size * 0.5f,
+                                                     p.y - labelCircle_size * 0.5f,
+                                                     labelCircle_size,
+                                                     labelCircle_size);
 
-            // リング上の頂点ポイントにも発音中の光彩オーラを付与
-            const auto ringPt = projection.projectCircleIndex (i, 0.0f, 1.0f);
-            const float ptHaloRadius = pitchPoint_radius * 2.6f;
-            juce::ColourGradient ptGlow (
-                glowBase.withAlpha (0.45f), ringPt.x, ringPt.y,
-                glowBase.withAlpha (0.0f),  ringPt.x + ptHaloRadius, ringPt.y,
-                true);
-            g.setGradientFill (ptGlow);
-            g.fillEllipse (ringPt.x - ptHaloRadius, ringPt.y - ptHaloRadius, ptHaloRadius * 2.0f, ptHaloRadius * 2.0f);
+            if (isSounding)
+            {
+                // 現在押鍵中（またはペダル保持中）のアクティブ音：ネオングロー＋太字ハイライト
+                const juce::Colour glowBase = isBass ? pointColour_root : juce::Colour (0xff38bdf8);
 
-            g.setFont (boldFont);
-            g.setColour (juce::Colours::white);
-            g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
-        }
-        else
-        {
-            // 離鍵後の確定構成音はクリーンな通常ハイライト（発光なし）、非構成音は控えめなグレー
-            g.setFont (regularFont);
-            const juce::Colour textColour = isInChord ? pointColour.withAlpha (0.88f) : inactiveNoteColour;
-            g.setColour (textColour);
-            g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
+                // 外周ソフトネオングロー（ラジアルグラデーション）
+                const float glowRadius = labelCircle_size * 0.62f;
+                juce::ColourGradient labelGlow (
+                    glowBase.withAlpha (0.36f), p.x, p.y,
+                    glowBase.withAlpha (0.0f),  p.x + glowRadius, p.y,
+                    true);
+                labelGlow.addColour (0.45, glowBase.withAlpha (0.16f));
+                g.setGradientFill (labelGlow);
+                g.fillEllipse (p.x - glowRadius, p.y - glowRadius, glowRadius * 2.0f, glowRadius * 2.0f);
+
+                // リング上の頂点ポイントにも発音中の光彩オーラを付与
+                const auto ringPt = projection.projectCircleIndex (i, 0.0f, 1.0f);
+                const float ptHaloRadius = pitchPoint_radius * 2.6f;
+                juce::ColourGradient ptGlow (
+                    glowBase.withAlpha (0.45f), ringPt.x, ringPt.y,
+                    glowBase.withAlpha (0.0f),  ringPt.x + ptHaloRadius, ringPt.y,
+                    true);
+                ptGlow.addColour (0.45, glowBase.withAlpha (0.20f));
+                g.setGradientFill (ptGlow);
+                g.fillEllipse (ringPt.x - ptHaloRadius, ringPt.y - ptHaloRadius, ptHaloRadius * 2.0f, ptHaloRadius * 2.0f);
+
+                g.setFont (boldFont);
+                g.setColour (juce::Colours::white);
+                g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
+            }
+            else
+            {
+                // 離鍵後の確定構成音はクリーンな通常ハイライト（発光なし）、非構成音は控えめなグレー
+                g.setFont (regularFont);
+                const juce::Colour textColour = isInChord ? pointColour.withAlpha (0.88f) : inactiveNoteColour;
+                g.setColour (textColour);
+                g.drawText (circleNoteNames[i], labelBounds, juce::Justification::centred);
+            }
         }
     }
 }
@@ -561,32 +594,35 @@ void HarmonyVisualizerAudioProcessorEditor::drawChordRingAndPolygon (
     const float ringThickness = projection.getProjectedSize (circleThickness, z, 0.35f);
 
     // 1. 深度 Z における五度圏リング（空気遠近＋被写界深度により奥のリングほど柔らかくボケて霞む）
-    const float ringAlpha = isForeground ? 1.0f : juce::jlimit (0.10f, 0.65f, effectiveAlpha * 0.78f);
-    if (!isForeground && dofBlur > 0.05f)
+    if (audioProcessor.getShowGuides())
     {
-        const juce::Colour ringBlurCol = applyAerialPerspective (
-            circleColour.brighter (0.08f), z, ringAlpha * 0.38f * dofBlur, 0.15f);
-        g.setColour (ringBlurCol);
+        const float ringAlpha = isForeground ? 1.0f : juce::jlimit (0.10f, 0.65f, effectiveAlpha * 0.78f);
+        if (!isForeground && dofBlur > 0.05f)
+        {
+            const juce::Colour ringBlurCol = applyAerialPerspective (
+                circleColour.brighter (0.08f), z, ringAlpha * 0.38f * dofBlur, 0.15f);
+            g.setColour (ringBlurCol);
+            g.drawEllipse (circleCenter.x - projectedRadius,
+                           circleCenter.y - projectedRadius,
+                           projectedDiameter,
+                           projectedDiameter,
+                           ringThickness * (1.0f + dofBlur * 1.9f));
+        }
+
+        const float ringCoreAlpha = isForeground ? 1.0f : ringAlpha * (1.0f - dofBlur * 0.48f);
+        const juce::Colour ringCol = isForeground
+            ? circleColour
+            : applyAerialPerspective (circleColour.brighter (0.08f), z, ringCoreAlpha, 0.15f);
+        g.setColour (ringCol);
         g.drawEllipse (circleCenter.x - projectedRadius,
                        circleCenter.y - projectedRadius,
                        projectedDiameter,
                        projectedDiameter,
-                       ringThickness * (1.0f + dofBlur * 1.9f));
+                       ringThickness);
     }
 
-    const float ringCoreAlpha = isForeground ? 1.0f : ringAlpha * (1.0f - dofBlur * 0.48f);
-    const juce::Colour ringCol = isForeground
-        ? circleColour
-        : applyAerialPerspective (circleColour.brighter (0.08f), z, ringCoreAlpha, 0.15f);
-    g.setColour (ringCol);
-    g.drawEllipse (circleCenter.x - projectedRadius,
-                   circleCenter.y - projectedRadius,
-                   projectedDiameter,
-                   projectedDiameter,
-                   ringThickness);
-
     // 2. 最前面のみ12音位置の控えめなガイドドットを描画
-    if (isForeground)
+    if (isForeground && audioProcessor.getShowGuideDots())
     {
         const float guideDotRadius = pitchPoint_radius * 0.35f;
         const float guideDotDiameter = guideDotRadius * 2.0f;
@@ -761,6 +797,12 @@ void HarmonyVisualizerAudioProcessorEditor::syncSettingsFromProcessor()
     quantizeWindowSlider.setValue (quantizeMs, juce::dontSendNotification);
     arpeggioThresholdSlider.setValue (arpeggioMs, juce::dontSendNotification);
 
+    showVoiceLeadingToggle.setToggleState (audioProcessor.getShowVoiceLeading(), juce::dontSendNotification);
+    showPastChordsToggle.setToggleState (audioProcessor.getShowPastChords(), juce::dontSendNotification);
+    showGuidesToggle.setToggleState (audioProcessor.getShowGuides(), juce::dontSendNotification);
+    showNoteNamesToggle.setToggleState (audioProcessor.getShowNoteNames(), juce::dontSendNotification);
+    showGuideDotsToggle.setToggleState (audioProcessor.getShowGuideDots(), juce::dontSendNotification);
+
     lastSyncedSettingsRevision = audioProcessor.getSettingsRevision();
 }
 
@@ -783,7 +825,7 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
     const float h = static_cast<float> (getHeight());
 
     // 右端からスライドインするスリムなサイドドロワー（インスペクターパネル）
-    const float drawerW = juce::jlimit (190.0f, 240.0f, w * 0.48f);
+    const float drawerW = juce::jlimit (200.0f, 250.0f, w * 0.48f);
     const float slideOffsetX = (1.0f - settingsModalAlpha) * drawerW;
 
     modalCardBounds = juce::Rectangle<float> (w - drawerW + slideOffsetX,
@@ -800,11 +842,21 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
     historySizeSlider.setVisible (showControls);
     quantizeWindowSlider.setVisible (showControls);
     arpeggioThresholdSlider.setVisible (showControls);
+    showVoiceLeadingToggle.setVisible (showControls);
+    showPastChordsToggle.setVisible (showControls);
+    showGuidesToggle.setVisible (showControls);
+    showNoteNamesToggle.setVisible (showControls);
+    showGuideDotsToggle.setVisible (showControls);
     resetSettingsButton.setVisible (showControls);
 
     historySizeSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
     quantizeWindowSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
     arpeggioThresholdSlider.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    showVoiceLeadingToggle.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    showPastChordsToggle.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    showGuidesToggle.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    showNoteNamesToggle.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
+    showGuideDotsToggle.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
     resetSettingsButton.setInterceptsMouseClicks (isSettingsModalOpen, isSettingsModalOpen);
 
     if (showControls)
@@ -812,19 +864,34 @@ void HarmonyVisualizerAudioProcessorEditor::updateSettingsModalLayout()
         historySizeSlider.setAlpha (settingsModalAlpha);
         quantizeWindowSlider.setAlpha (settingsModalAlpha);
         arpeggioThresholdSlider.setAlpha (settingsModalAlpha);
+        showVoiceLeadingToggle.setAlpha (settingsModalAlpha);
+        showPastChordsToggle.setAlpha (settingsModalAlpha);
+        showGuidesToggle.setAlpha (settingsModalAlpha);
+        showNoteNamesToggle.setAlpha (settingsModalAlpha);
+        showGuideDotsToggle.setAlpha (settingsModalAlpha);
         resetSettingsButton.setAlpha (settingsModalAlpha);
 
         const int contentX = static_cast<int> (std::round (modalCardBounds.getX() + 14.0f));
         const int contentW = static_cast<int> (std::round (modalCardBounds.getWidth() - 28.0f));
-        const int baseTop = static_cast<int> (std::round (modalCardBounds.getY() + 54.0f));
-        const int rowStep = 50;
+        const int baseTop = static_cast<int> (std::round (modalCardBounds.getY() + 50.0f));
+        const int rowStep = 44;
 
-        historySizeSlider.setBounds (contentX, baseTop + 18, contentW, 24);
-        quantizeWindowSlider.setBounds (contentX, baseTop + rowStep + 18, contentW, 24);
-        arpeggioThresholdSlider.setBounds (contentX, baseTop + rowStep * 2 + 18, contentW, 24);
+        historySizeSlider.setBounds (contentX, baseTop + 16, contentW, 22);
+        quantizeWindowSlider.setBounds (contentX, baseTop + rowStep + 16, contentW, 22);
+        arpeggioThresholdSlider.setBounds (contentX, baseTop + rowStep * 2 + 16, contentW, 22);
 
-        const int resetBtnH = 26;
-        const int resetBtnY = static_cast<int> (std::round (modalCardBounds.getBottom() - 78.0f));
+        const int layersTop = baseTop + rowStep * 3 + 12;
+        const int toggleH = 20;
+        const int toggleStep = 22;
+
+        showVoiceLeadingToggle.setBounds (contentX, layersTop + 16, contentW, toggleH);
+        showPastChordsToggle.setBounds (contentX, layersTop + 16 + toggleStep, contentW, toggleH);
+        showGuidesToggle.setBounds (contentX, layersTop + 16 + toggleStep * 2, contentW, toggleH);
+        showNoteNamesToggle.setBounds (contentX, layersTop + 16 + toggleStep * 3, contentW, toggleH);
+        showGuideDotsToggle.setBounds (contentX, layersTop + 16 + toggleStep * 4, contentW, toggleH);
+
+        const int resetBtnH = 24;
+        const int resetBtnY = static_cast<int> (std::round (modalCardBounds.getBottom() - 74.0f));
         resetSettingsButton.setBounds (contentX, resetBtnY, contentW, resetBtnH);
     }
 }
@@ -941,21 +1008,34 @@ void HarmonyVisualizerAudioProcessorEditor::drawSettingsModalOverlay (juce::Grap
                 closeCenter.x - crossHalf, closeCenter.y + crossHalf, 1.6f);
 
     // 4. 各スライダー項目のラベル
-    const float baseTop = modalCardBounds.getY() + 54.0f;
-    const float rowStep = 50.0f;
+    const float baseTop = modalCardBounds.getY() + 50.0f;
+    const float rowStep = 44.0f;
 
-    g.setFont (juce::FontOptions (11.5f));
+    g.setFont (juce::FontOptions (11.0f));
     g.setColour (juce::Colour (0xffcbd5e1).withAlpha (a));
     g.drawText ("History Generations",
-                juce::Rectangle<float> (contentX, baseTop, contentW, 18.0f),
+                juce::Rectangle<float> (contentX, baseTop, contentW, 16.0f),
                 juce::Justification::centredLeft, false);
 
     g.drawText ("Quantize Window",
-                juce::Rectangle<float> (contentX, baseTop + rowStep, contentW, 18.0f),
+                juce::Rectangle<float> (contentX, baseTop + rowStep, contentW, 16.0f),
                 juce::Justification::centredLeft, false);
 
     g.drawText ("Arpeggio Window",
-                juce::Rectangle<float> (contentX, baseTop + rowStep * 2.0f, contentW, 18.0f),
+                juce::Rectangle<float> (contentX, baseTop + rowStep * 2.0f, contentW, 16.0f),
+                juce::Justification::centredLeft, false);
+
+    // セクション区切り線 ＆ 表示レイヤー設定見出し
+    const float layersSectionTop = baseTop + rowStep * 3.0f + 10.0f;
+    g.setColour (juce::Colour (0xff2a3245).withAlpha (a * 0.8f));
+    g.drawHorizontalLine (static_cast<int> (layersSectionTop),
+                          modalCardBounds.getX() + 14.0f,
+                          modalCardBounds.getRight() - 14.0f);
+
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    g.setColour (juce::Colour (0xff94a3b8).withAlpha (a));
+    g.drawText ("DISPLAY LAYERS",
+                juce::Rectangle<float> (contentX, layersSectionTop + 4.0f, contentW, 16.0f),
                 juce::Justification::centredLeft, false);
 
     // 5. フッター区切り線 ＆ About（バージョン・ビルド情報）表示

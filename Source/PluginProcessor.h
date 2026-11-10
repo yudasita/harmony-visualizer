@@ -85,6 +85,12 @@ public:
     static constexpr double defaultQuantizeWindowMs = 60.0;
     static constexpr double defaultArpeggioThresholdMs = 450.0;
 
+    static constexpr bool defaultShowVoiceLeading = true;
+    static constexpr bool defaultShowPastChords = true;
+    static constexpr bool defaultShowGuides = true;
+    static constexpr bool defaultShowNoteNames = true;
+    static constexpr bool defaultShowGuideDots = true;
+
     int getMaxHistorySize() const noexcept;
     void setMaxHistorySize (int size);
 
@@ -93,6 +99,21 @@ public:
 
     double getArpeggioThresholdMs() const noexcept;
     void setArpeggioThresholdMs (double ms);
+
+    bool getShowVoiceLeading() const noexcept;
+    void setShowVoiceLeading (bool show);
+
+    bool getShowPastChords() const noexcept;
+    void setShowPastChords (bool show);
+
+    bool getShowGuides() const noexcept;
+    void setShowGuides (bool show);
+
+    bool getShowNoteNames() const noexcept;
+    void setShowNoteNames (bool show);
+
+    bool getShowGuideDots() const noexcept;
+    void setShowGuideDots (bool show);
 
     void resetSettingsToDefaults();
 
