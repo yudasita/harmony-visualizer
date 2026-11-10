@@ -17,6 +17,7 @@
 #include "VoiceLeadingSolver.h"
 #include <array>
 #include <vector>
+#include <map>
 #include <cmath>
 
 //==============================================================================
@@ -134,6 +135,7 @@ private:
     void drawBackgroundGuides (juce::Graphics& g);
     void drawPastChordLayers (juce::Graphics& g);
     void drawVoiceLeadingConnections (juce::Graphics& g);
+    void drawIntervalSurfaces (juce::Graphics& g, const std::vector<VoiceLeadingConnection>& connections);
     void drawSingleVoiceLeadingThread (juce::Graphics& g,
                                        const VoiceLeadingConnection& conn,
                                        float fromZ,
